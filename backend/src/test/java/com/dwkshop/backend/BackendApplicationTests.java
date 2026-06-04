@@ -238,6 +238,21 @@ class BackendApplicationTests {
     }
 
     @Test
+    void cartUpdateQuantityRejectsItemsThatAreNoLongerAddable() throws Exception {
+        clearCart();
+        jdbcTemplate.update("""
+            insert into cart_item (user_id, product_id, sku_id, quantity, checked_flag, item_status)
+            values (1, 5, 5, 1, true, 'NORMAL')
+            """);
+        Long itemId = jdbcTemplate.queryForObject("select id from cart_item where user_id = 1 and sku_id = 5", Long.class);
+
+        mockMvc.perform(put("/api/cart/items/{id}", itemId).contentType("application/json").content("""
+            {"quantity":2}
+            """))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void confirmOrderReturnsFullDataWithCouponPointsFreightAndToken() throws Exception {
         clearCart();
         mockMvc.perform(post("/api/cart/items").contentType("application/json").content("""

@@ -126,6 +126,7 @@ public class OrderService {
             }
             OrderResponse order = persistOrder(userId, session.request(), calculation, request.remark());
             session.markUsed();
+            settlementSessions.remove(request.settlementToken());
             return order;
         }
     }
@@ -317,7 +318,14 @@ public class OrderService {
         TradeOrder savedOrder = tradeOrderRepository.save(order);
 
         for (SettlementItem item : calculation.items()) {
-            ProductSku sku = item.sku();
+            ProductSku sku = productSkuRepository.findByIdForUpdate(item.sku().getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格已失效"));
+            if (!ENABLED.equals(sku.getSkuStatus())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
+            }
+            if (sku.getStock() < item.quantity()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "库存不足，请修改购买数量");
+            }
             sku.setStock(sku.getStock() - item.quantity());
             sku.setLockedStock(sku.getLockedStock() + item.quantity());
             sku.setUpdatedAt(now);

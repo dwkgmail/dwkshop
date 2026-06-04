@@ -89,8 +89,13 @@ public class CartService {
         CartItem item = findUserCartItem(userId, itemId);
         ProductSku sku = productSkuRepository.findById(item.getSkuId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格已失效"));
-        validateStock(sku, request.quantity());
+        Product product = productRepository.findById(item.getProductId())
+            .filter(candidate -> !Boolean.TRUE.equals(candidate.getDeletedFlag()))
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品不存在"));
+        validateAddable(product, sku, request.quantity());
         item.setQuantity(request.quantity());
+        item.setItemStatus(NORMAL);
+        item.setCheckedFlag(true);
         item.setUpdatedAt(LocalDateTime.now());
         cartItemRepository.save(item);
         return listItems(userId);

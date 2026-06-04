@@ -233,6 +233,7 @@ SKU 库存为 `0` 或 SKU 禁用时，接口返回 `selectable=false`。
 - `GET /api/orders`：订单列表
 - `GET /api/orders/{id}`：订单详情
 - `POST /api/orders/{id}/cancel`：取消待支付订单
+- `POST /api/orders/{id}/pay`：模拟支付并将待支付订单流转为待发货
 
 购物车结算确认示例：
 

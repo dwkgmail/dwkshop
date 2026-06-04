@@ -369,6 +369,46 @@ class BackendApplicationTests {
     }
 
     @Test
+    void payOrderMovesWaitPayOrderToWaitShipAndPreventsCancel() throws Exception {
+        clearCart();
+        MvcResult confirm = mockMvc.perform(post("/api/orders/confirm").contentType("application/json").content("""
+            {"sourceType":"BUY_NOW","skuId":1,"quantity":1}
+            """))
+            .andExpect(status().isOk())
+            .andReturn();
+        String token = com.jayway.jsonpath.JsonPath.read(confirm.getResponse().getContentAsString(), "$.settlementToken");
+        Integer payAmount = com.jayway.jsonpath.JsonPath.read(confirm.getResponse().getContentAsString(), "$.amount.payAmount");
+
+        MvcResult created = mockMvc.perform(post("/api/orders/create").contentType("application/json").content("""
+            {"settlementToken":"%s","expectedPayAmount":%d}
+            """.formatted(token, payAmount)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_PAY"))
+            .andExpect(jsonPath("$.payStatus").value("UNPAID"))
+            .andReturn();
+        Integer orderId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/api/orders/{id}/pay", orderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"))
+            .andExpect(jsonPath("$.payStatus").value("PAID"))
+            .andExpect(jsonPath("$.deliveryStatus").value("UNSHIPPED"));
+
+        mockMvc.perform(get("/api/orders/{id}", orderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"))
+            .andExpect(jsonPath("$.payStatus").value("PAID"));
+
+        mockMvc.perform(post("/api/orders/{id}/pay", orderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"))
+            .andExpect(jsonPath("$.payStatus").value("PAID"));
+
+        mockMvc.perform(post("/api/orders/{id}/cancel", orderId))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void createOrderRejectsAmountChangedOffSaleAndStockNotEnough() throws Exception {
         clearCart();
         MvcResult confirm = mockMvc.perform(post("/api/orders/confirm").contentType("application/json").content("""

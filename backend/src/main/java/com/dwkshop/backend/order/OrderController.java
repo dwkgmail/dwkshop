@@ -59,6 +59,11 @@ public class OrderController {
         return orderService.cancel(resolveUserId(userId), id);
     }
 
+    @PostMapping("/{id}/pay")
+    public OrderResponse pay(@PathVariable Long id, @RequestParam(required = false) Long userId) {
+        return orderService.pay(resolveUserId(userId), id);
+    }
+
     private Long resolveUserId(Long userId) {
         if (userId != null) {
             return userId;

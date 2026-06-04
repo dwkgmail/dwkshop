@@ -152,3 +152,9 @@ export function cancelOrder(id: number) {
     method: 'POST'
   });
 }
+
+export function payOrder(id: number) {
+  return request<OrderDetail>(`/api/orders/${id}/pay`, {
+    method: 'POST'
+  });
+}

@@ -27,6 +27,7 @@ import {
   createOrder,
   getOrder,
   getOrders,
+  payOrder,
   type ConfirmOrderPayload,
   type ConfirmOrderResponse,
   type OrderDetail,
@@ -368,9 +369,13 @@ async function submitOrder() {
   });
 }
 
-async function simulatePaySuccess() {
-  paymentMessage.value = 'Payment success, order is waiting for shipment';
-  showToast('Payment success');
+async function payCurrentOrder() {
+  if (!currentOrder.value) return;
+  await runTask(async () => {
+    currentOrder.value = await payOrder(currentOrder.value!.id);
+    paymentMessage.value = 'Payment success, order is waiting for shipment';
+    showToast('Payment success');
+  });
 }
 
 async function loadOrders() {
@@ -702,7 +707,7 @@ onUnmounted(() => {
 
       <section v-else-if="route.view === 'payment'" class="view payment-view">
         <section class="pay-amount">
-          <span>寰呮敮浠</span>
+          <span>{{ currentOrder?.orderStatus === 'WAIT_SHIP' ? 'Waiting shipment' : '寰呮敮浠' }}</span>
           <strong>楼{{ currentOrder?.payAmountText ?? '0' }}</strong>
           <p>{{ currentOrder?.orderNo }}</p>
         </section>
@@ -710,7 +715,7 @@ onUnmounted(() => {
           <label><input type="radio" checked /> 妯℃嫙寰俊鏀粯</label>
           <label><input type="radio" /> 妯℃嫙鏀粯瀹濇敮浠</label>
         </section>
-        <button class="primary wide" @click="simulatePaySuccess">绔嬪嵆鏀粯</button>
+        <button class="primary wide" :disabled="currentOrder?.orderStatus !== 'WAIT_PAY'" @click="payCurrentOrder">绔嬪嵆鏀粯</button>
         <p v-if="paymentMessage" class="success-text">{{ paymentMessage }}</p>
         <button class="ghost wide" @click="currentOrder && navigate('order-detail', { id: currentOrder.id })">鏌ョ湅璁㈠崟</button>
       </section>

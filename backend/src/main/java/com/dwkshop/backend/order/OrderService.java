@@ -169,6 +169,34 @@ public class OrderService {
         return toOrderResponse(order);
     }
 
+    @Transactional
+    public OrderResponse pay(Long userId, Long orderId) {
+        TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+        if ("PAID".equals(order.getPayStatus())) {
+            return toOrderResponse(order);
+        }
+        if (!"WAIT_PAY".equals(order.getOrderStatus()) || !"UNPAID".equals(order.getPayStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order cannot be paid");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
+            order.setOrderStatus("CANCELED");
+            order.setPayStatus("CLOSED");
+            order.setCancelTime(now);
+            order.setUpdatedAt(now);
+            tradeOrderRepository.save(order);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order payment expired");
+        }
+        order.setOrderStatus("WAIT_SHIP");
+        order.setPayStatus("PAID");
+        order.setDeliveryStatus("UNSHIPPED");
+        order.setPayTime(now);
+        order.setUpdatedAt(now);
+        tradeOrderRepository.save(order);
+        return toOrderResponse(order);
+    }
+
     private SettlementCalculation calculate(Long userId, ConfirmOrderRequest request) {
         String sourceType = normalizeSourceType(request.sourceType());
         List<SettlementItem> items = resolveItems(userId, sourceType, request);

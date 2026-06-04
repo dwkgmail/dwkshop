@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { loginUser } from './api/auth';
+import { clearAuthToken, getAuthToken, setAuthToken } from './api/client';
 import {
   addCartItem,
   checkAllCartItems,
@@ -33,6 +35,7 @@ import {
 
 type ViewName =
   | 'home'
+  | 'login'
   | 'category'
   | 'discover'
   | 'search'
@@ -52,6 +55,10 @@ const route = reactive<{ view: ViewName; params: Record<string, string | number>
 const loading = ref(false);
 const error = ref('');
 const toast = ref('');
+const loggedIn = ref(Boolean(getAuthToken()));
+const loginForm = reactive({ mobile: '13800000001', password: 'user123' });
+const currentUserName = ref(localStorage.getItem('dwkshop-user-name') ?? '');
+const postLoginTarget = ref<{ view: ViewName; params: Record<string, string | number> } | null>(null);
 const products = ref<ProductSummary[]>([]);
 const searchResults = ref<ProductSummary[]>([]);
 const categories = ref<Category[]>([]);
@@ -67,7 +74,9 @@ const currentOrder = ref<OrderDetail | null>(null);
 const orders = ref<OrderSummary[]>([]);
 const paymentMessage = ref('');
 
-const cartBadge = computed(() => cart.value?.badgeCount ?? 0);
+const cartBadge = computed(() => (loggedIn.value ? cart.value?.badgeCount ?? 0 : 0));
+const userDisplayName = computed(() => currentUserName.value || '测试用户');
+const userAvatarText = computed(() => userDisplayName.value.slice(0, 1));
 const currentSku = computed(() => productDetail.value?.skus.find((item) => item.id === selectedSkuId.value) ?? null);
 const allCartChecked = computed(() => {
   const items = cart.value?.items ?? [];
@@ -95,6 +104,13 @@ async function runTask(task: () => Promise<void>) {
 }
 
 function navigate(view: ViewName, params: Record<string, string | number> = {}) {
+  if (requiresLogin(view) && !loggedIn.value) {
+    postLoginTarget.value = { view, params };
+    route.view = 'login';
+    route.params = {};
+    error.value = '';
+    return;
+  }
   route.view = view;
   route.params = params;
   error.value = '';
@@ -105,6 +121,49 @@ function navigate(view: ViewName, params: Record<string, string | number> = {}) 
   if (view === 'mine') loadCart();
   if (view === 'detail' && params.id) loadProductDetail(Number(params.id));
   if (view === 'order-detail' && params.id) loadOrderDetail(Number(params.id));
+}
+
+function requiresLogin(view: ViewName) {
+  return ['cart', 'confirm', 'payment', 'orders', 'order-detail', 'mine'].includes(view);
+}
+
+function openLogin(target: { view: ViewName; params: Record<string, string | number> } = { view: 'mine', params: {} }) {
+  postLoginTarget.value = target;
+  route.view = 'login';
+  route.params = {};
+  error.value = '';
+}
+
+async function login() {
+  const mobile = loginForm.mobile.trim();
+  const password = loginForm.password.trim();
+  if (!mobile || !password) {
+    showToast('请输入手机号和密码');
+    return;
+  }
+  await runTask(async () => {
+    const result = await loginUser(mobile, password);
+    setAuthToken(result.token);
+    localStorage.setItem('dwkshop-user-name', result.name);
+    currentUserName.value = result.name;
+    loggedIn.value = true;
+    showToast(`欢迎回来，${result.name}`);
+    const target = postLoginTarget.value ?? { view: 'home' as ViewName, params: {} };
+    postLoginTarget.value = null;
+    navigate(target.view, target.params);
+  });
+}
+
+function logout() {
+  clearAuthToken();
+  localStorage.removeItem('dwkshop-user-name');
+  loggedIn.value = false;
+  currentUserName.value = '';
+  cart.value = null;
+  orders.value = [];
+  currentOrder.value = null;
+  showToast('已退出登录');
+  navigate('home');
 }
 
 async function loadHome() {
@@ -145,6 +204,10 @@ async function loadCart() {
 }
 
 async function loadCartQuietly() {
+  if (!loggedIn.value) {
+    cart.value = null;
+    return;
+  }
   try {
     cart.value = await getCart();
   } catch {
@@ -165,6 +228,10 @@ async function submitSearch() {
 }
 
 async function addCurrentSkuToCart() {
+  if (!loggedIn.value) {
+    openLogin({ view: 'detail', params: productDetail.value ? { id: productDetail.value.id } : {} });
+    return;
+  }
   const sku = currentSku.value;
   if (!productDetail.value || !sku) {
     showToast('请选择规格');
@@ -177,6 +244,10 @@ async function addCurrentSkuToCart() {
 }
 
 async function buyNow() {
+  if (!loggedIn.value) {
+    openLogin({ view: 'detail', params: productDetail.value ? { id: productDetail.value.id } : {} });
+    return;
+  }
   const sku = currentSku.value;
   if (!productDetail.value || !sku) {
     showToast('请选择规格');
@@ -191,6 +262,10 @@ async function buyNow() {
 }
 
 async function openCartConfirm() {
+  if (!loggedIn.value) {
+    openLogin({ view: 'cart', params: {} });
+    return;
+  }
   const ids = (cart.value?.items ?? []).filter((item) => item.checked && item.canCheck).map((item) => item.id);
   if (ids.length === 0) {
     showToast('请选择可结算商品');
@@ -307,7 +382,7 @@ onMounted(loadHome);
   <main class="app-shell">
     <div v-if="toast" class="toast">{{ toast }}</div>
     <section class="app-content">
-      <header v-if="route.view !== 'home'" class="page-header">
+      <header v-if="route.view !== 'home' && route.view !== 'login'" class="page-header">
         <button class="icon-btn" @click="navigate('home')">‹</button>
         <strong>
           {{
@@ -325,13 +400,36 @@ onMounted(loadHome);
         <span></span>
       </header>
 
-      <section v-if="route.view === 'home'" class="view">
+      <section v-if="route.view === 'login'" class="view login-view">
+        <div class="login-brand">
+          <span>DWK Shop</span>
+          <h1>用户登录</h1>
+          <p>登录后可使用购物车、下单和订单查询。</p>
+        </div>
+        <form class="login-card" @submit.prevent="login">
+          <label>
+            <span>手机号</span>
+            <input v-model="loginForm.mobile" inputmode="tel" autocomplete="tel" placeholder="请输入手机号" />
+          </label>
+          <label>
+            <span>密码</span>
+            <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+          </label>
+          <button class="primary wide" type="submit">登录</button>
+          <button class="ghost wide" type="button" @click="navigate('home')">先去逛逛</button>
+          <p class="demo-account">测试账号：13800000001 / user123</p>
+        </form>
+      </section>
+
+      <section v-else-if="route.view === 'home'" class="view">
         <div class="home-top">
           <div>
             <span>DWK Shop</span>
             <h1>精选好物</h1>
           </div>
-          <button class="round-btn" @click="navigate('orders')">订单</button>
+          <button class="round-btn" @click="loggedIn ? navigate('orders') : openLogin({ view: 'orders', params: {} })">
+            {{ loggedIn ? '订单' : '登录' }}
+          </button>
         </div>
         <form class="search-bar" @submit.prevent="submitSearch">
           <input v-model="searchKeyword" placeholder="搜索商品、品牌" />
@@ -554,11 +652,12 @@ onMounted(loadHome);
 
       <section v-else-if="route.view === 'mine'" class="view mine-view">
         <section class="profile-card">
-          <div class="avatar">张</div>
+          <div class="avatar">{{ userAvatarText }}</div>
           <div>
-            <strong>张三</strong>
+            <strong>{{ userDisplayName }}</strong>
             <span>普通会员</span>
           </div>
+          <button class="logout-btn" @click="logout">退出</button>
         </section>
         <section class="stats">
           <button @click="navigate('orders')"><strong>订单</strong><span>查看全部</span></button>
@@ -579,7 +678,7 @@ onMounted(loadHome);
       </div>
     </section>
 
-    <nav class="tabbar">
+    <nav v-if="route.view !== 'login'" class="tabbar">
       <button :class="{ active: route.view === 'home' }" @click="navigate('home')">首页</button>
       <button :class="{ active: route.view === 'category' }" @click="navigate('category')">分类</button>
       <button :class="{ active: route.view === 'discover' || route.view === 'search' }" @click="navigate('discover')">发现</button>

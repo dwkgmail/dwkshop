@@ -75,6 +75,74 @@ button:disabled {
   font-size: 28px;
 }
 
+.login-view {
+  min-height: 100vh;
+  padding: 54px 18px 24px;
+  background:
+    linear-gradient(180deg, #fff7ed 0%, #f7f8fa 42%),
+    #f7f8fa;
+}
+
+.login-brand {
+  margin-bottom: 28px;
+}
+
+.login-brand span {
+  color: #ff6a00;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.login-brand h1 {
+  margin: 8px 0 0;
+  font-size: 30px;
+}
+
+.login-brand p,
+.demo-account {
+  margin: 8px 0 0;
+  color: #7a8494;
+  font-size: 13px;
+}
+
+.login-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  padding: 18px;
+  background: #fff;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
+}
+
+.login-card label {
+  display: grid;
+  gap: 8px;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-card input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #f9fafb;
+  color: #222;
+}
+
+.login-card input:focus {
+  outline: 2px solid rgba(255, 106, 0, 0.18);
+  border-color: #ff6a00;
+  background: #fff;
+}
+
+.demo-account {
+  text-align: center;
+}
+
 .round-btn,
 .icon-btn,
 .section-title button,
@@ -573,6 +641,20 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.profile-card > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.logout-btn {
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 16px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 12px;
 }
 
 .avatar {

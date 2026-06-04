@@ -1,7 +1,7 @@
-<script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
-import { loginUser } from './api/auth';
-import { clearAuthToken, getAuthToken, setAuthToken } from './api/client';
+﻿<script setup lang="ts">
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { changeUserPassword, loginUser, logoutUser, registerUser } from './api/auth';
+import { AUTH_EXPIRED_EVENT, clearAuthToken, getAuthToken, setAuthTokens } from './api/client';
 import {
   addCartItem,
   checkAllCartItems,
@@ -57,6 +57,10 @@ const error = ref('');
 const toast = ref('');
 const loggedIn = ref(Boolean(getAuthToken()));
 const loginForm = reactive({ mobile: '13800000001', password: 'user123' });
+const registerForm = reactive({ mobile: '', password: '', nickname: '' });
+const passwordForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' });
+const authMode = ref<'login' | 'register'>('login');
+const showPasswordPanel = ref(false);
 const currentUserName = ref(localStorage.getItem('dwkshop-user-name') ?? '');
 const postLoginTarget = ref<{ view: ViewName; params: Record<string, string | number> } | null>(null);
 const products = ref<ProductSummary[]>([]);
@@ -75,7 +79,7 @@ const orders = ref<OrderSummary[]>([]);
 const paymentMessage = ref('');
 
 const cartBadge = computed(() => (loggedIn.value ? cart.value?.badgeCount ?? 0 : 0));
-const userDisplayName = computed(() => currentUserName.value || '测试用户');
+const userDisplayName = computed(() => currentUserName.value || '娴嬭瘯鐢ㄦ埛');
 const userAvatarText = computed(() => userDisplayName.value.slice(0, 1));
 const currentSku = computed(() => productDetail.value?.skus.find((item) => item.id === selectedSkuId.value) ?? null);
 const allCartChecked = computed(() => {
@@ -97,7 +101,7 @@ async function runTask(task: () => Promise<void>) {
   try {
     await task();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '操作失败，请稍后重试';
+    error.value = err instanceof Error ? err.message : '鎿嶄綔澶辫触锛岃绋嶅悗閲嶈瘯';
   } finally {
     loading.value = false;
   }
@@ -138,23 +142,64 @@ async function login() {
   const mobile = loginForm.mobile.trim();
   const password = loginForm.password.trim();
   if (!mobile || !password) {
-    showToast('请输入手机号和密码');
+    showToast('Please enter mobile and password');
     return;
   }
   await runTask(async () => {
     const result = await loginUser(mobile, password);
-    setAuthToken(result.token);
+    setAuthTokens(result.token, result.refreshToken);
     localStorage.setItem('dwkshop-user-name', result.name);
     currentUserName.value = result.name;
     loggedIn.value = true;
-    showToast(`欢迎回来，${result.name}`);
+    showToast(`娆㈣繋鍥炴潵锛?{result.name}`);
     const target = postLoginTarget.value ?? { view: 'home' as ViewName, params: {} };
     postLoginTarget.value = null;
     navigate(target.view, target.params);
   });
 }
 
-function logout() {
+async function register() {
+  const mobile = registerForm.mobile.trim();
+  const password = registerForm.password.trim();
+  const nickname = registerForm.nickname.trim();
+  if (!mobile || !password) {
+    showToast('Please enter mobile and password');
+    return;
+  }
+  await runTask(async () => {
+    const result = await registerUser(mobile, password, nickname);
+    setAuthTokens(result.token, result.refreshToken);
+    localStorage.setItem('dwkshop-user-name', result.name);
+    currentUserName.value = result.name;
+    loggedIn.value = true;
+    showToast(`Registered, welcome ${result.name}`);
+    const target = postLoginTarget.value ?? { view: 'home' as ViewName, params: {} };
+    postLoginTarget.value = null;
+    navigate(target.view, target.params);
+  });
+}
+
+async function changePassword() {
+  const oldPassword = passwordForm.oldPassword.trim();
+  const newPassword = passwordForm.newPassword.trim();
+  if (!oldPassword || !newPassword) {
+    showToast('Please enter old and new password');
+    return;
+  }
+  if (newPassword !== passwordForm.confirmPassword.trim()) {
+    showToast('New passwords do not match');
+    return;
+  }
+  await runTask(async () => {
+    const result = await changeUserPassword(oldPassword, newPassword);
+    setAuthTokens(result.token, result.refreshToken);
+    Object.assign(passwordForm, { oldPassword: '', newPassword: '', confirmPassword: '' });
+    showPasswordPanel.value = false;
+    showToast('Password updated');
+  });
+}
+
+function resetSession(message?: string) {
   clearAuthToken();
   localStorage.removeItem('dwkshop-user-name');
   loggedIn.value = false;
@@ -162,9 +207,31 @@ function logout() {
   cart.value = null;
   orders.value = [];
   currentOrder.value = null;
-  showToast('已退出登录');
-  navigate('home');
+  confirmData.value = null;
+  confirmPayload.value = null;
+  showPasswordPanel.value = false;
+  Object.assign(passwordForm, { oldPassword: '', newPassword: '', confirmPassword: '' });
+  if (message) showToast(message);
 }
+
+async function logout() {
+  try {
+    if (getAuthToken()) await logoutUser();
+  } catch {
+    // Client-side logout still clears all local session state.
+  }
+  resetSession('Logged out');
+  navigate('home');
+  return;
+}
+function handleAuthExpired() {
+  resetSession('Login expired, please sign in again');
+  postLoginTarget.value = requiresLogin(route.view) ? { view: route.view, params: { ...route.params } } : null;
+  route.view = 'login';
+  route.params = {};
+  authMode.value = 'login';
+}
+
 
 async function loadHome() {
   await runTask(async () => {
@@ -218,7 +285,7 @@ async function loadCartQuietly() {
 async function submitSearch() {
   const keyword = searchKeyword.value.trim();
   if (!keyword) {
-    showToast('请输入搜索关键词');
+    showToast('璇疯緭鍏ユ悳绱㈠叧閿瘝');
     return;
   }
   route.view = 'search';
@@ -234,12 +301,12 @@ async function addCurrentSkuToCart() {
   }
   const sku = currentSku.value;
   if (!productDetail.value || !sku) {
-    showToast('请选择规格');
+    showToast('璇烽€夋嫨瑙勬牸');
     return;
   }
   await runTask(async () => {
     cart.value = await addCartItem(sku.id, selectedQuantity.value);
-    showToast('已加入购物车');
+    showToast('宸插姞鍏ヨ喘鐗╄溅');
   });
 }
 
@@ -250,7 +317,7 @@ async function buyNow() {
   }
   const sku = currentSku.value;
   if (!productDetail.value || !sku) {
-    showToast('请选择规格');
+    showToast('璇烽€夋嫨瑙勬牸');
     return;
   }
   await openConfirm({
@@ -268,7 +335,7 @@ async function openCartConfirm() {
   }
   const ids = (cart.value?.items ?? []).filter((item) => item.checked && item.canCheck).map((item) => item.id);
   if (ids.length === 0) {
-    showToast('请选择可结算商品');
+    showToast('Please select items to checkout');
     return;
   }
   await openConfirm({ sourceType: 'CART', cartItemIds: ids, usePoints: true });
@@ -302,8 +369,8 @@ async function submitOrder() {
 }
 
 async function simulatePaySuccess() {
-  paymentMessage.value = '模拟支付成功，订单等待后台发货';
-  showToast('支付成功');
+  paymentMessage.value = 'Payment success, order is waiting for shipment';
+  showToast('Payment success');
 }
 
 async function loadOrders() {
@@ -321,7 +388,7 @@ async function loadOrderDetail(id: number) {
 async function cancelCurrentOrder(id: number) {
   await runTask(async () => {
     currentOrder.value = await cancelOrder(id);
-    showToast('订单已取消');
+    showToast('Order canceled');
   });
 }
 
@@ -335,7 +402,7 @@ async function changeCartQuantity(id: number, quantity: number) {
 async function removeCartItem(id: number) {
   await runTask(async () => {
     cart.value = await deleteCartItem(id);
-    showToast('已删除');
+    showToast('Deleted');
   });
 }
 
@@ -353,21 +420,21 @@ async function toggleAllCartItems() {
 
 function statusText(status: string) {
   const map: Record<string, string> = {
-    WAIT_PAY: '待支付',
-    CANCELED: '已取消',
-    WAIT_SHIP: '待发货',
-    WAIT_RECEIVE: '待收货',
-    FINISHED: '已完成'
+    WAIT_PAY: 'Pending payment',
+    CANCELED: 'Canceled',
+    WAIT_SHIP: 'Waiting shipment',
+    WAIT_RECEIVE: 'Waiting receipt',
+    FINISHED: 'Finished'
   };
   return map[status] ?? status;
 }
 
 function productTag(product: ProductSummary) {
-  if (product.deliveryType === 'COLD_CHAIN') return '冷链';
-  if (!product.allowCart) return '不可加购';
-  if (!product.allowSingleBuy) return '搭配购';
-  if (product.pointDeductEnabled) return '积分抵扣';
-  return '热卖';
+  if (product.deliveryType === 'COLD_CHAIN') return 'Cold chain';
+  if (!product.allowCart) return 'No cart';
+  if (!product.allowSingleBuy) return 'Bundle only';
+  if (product.pointDeductEnabled) return 'Points';
+  return 'Hot';
 }
 
 function imageTone(id: number) {
@@ -375,7 +442,14 @@ function imageTone(id: number) {
   return tones[id % tones.length];
 }
 
-onMounted(loadHome);
+onMounted(() => {
+  window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+  loadHome();
+});
+
+onUnmounted(() => {
+  window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+});
 </script>
 
 <template>
@@ -383,18 +457,18 @@ onMounted(loadHome);
     <div v-if="toast" class="toast">{{ toast }}</div>
     <section class="app-content">
       <header v-if="route.view !== 'home' && route.view !== 'login'" class="page-header">
-        <button class="icon-btn" @click="navigate('home')">‹</button>
+        <button class="icon-btn" @click="navigate('home')">鈥</button>
         <strong>
           {{
-            route.view === 'category' ? '分类' :
-            route.view === 'search' ? '搜索' :
-            route.view === 'detail' ? '商品详情' :
-            route.view === 'cart' ? '购物车' :
-            route.view === 'confirm' ? '确认订单' :
-            route.view === 'payment' ? '支付订单' :
-            route.view === 'orders' ? '我的订单' :
-            route.view === 'order-detail' ? '订单详情' :
-            route.view === 'mine' ? '我的' : '发现'
+            route.view === 'category' ? 'Category' :
+            route.view === 'search' ? 'Search' :
+            route.view === 'detail' ? 'Product detail' :
+            route.view === 'cart' ? 'Cart' :
+            route.view === 'confirm' ? 'Confirm order' :
+            route.view === 'payment' ? 'Payment' :
+            route.view === 'orders' ? 'Orders' :
+            route.view === 'order-detail' ? 'Order detail' :
+            route.view === 'mine' ? 'Mine' : 'Discover'
           }}
         </strong>
         <span></span>
@@ -403,21 +477,41 @@ onMounted(loadHome);
       <section v-if="route.view === 'login'" class="view login-view">
         <div class="login-brand">
           <span>DWK Shop</span>
-          <h1>用户登录</h1>
-          <p>登录后可使用购物车、下单和订单查询。</p>
+          <h1>鐢ㄦ埛鐧诲綍</h1>
+          <p>鐧诲綍鍚庡彲浣跨敤璐墿杞︺€佷笅鍗曞拰璁㈠崟鏌ヨ銆</p>
         </div>
-        <form class="login-card" @submit.prevent="login">
+        <div class="login-card auth-switch">
+          <button type="button" :class="{ active: authMode === 'login' }" @click="authMode = 'login'">Login</button>
+          <button type="button" :class="{ active: authMode === 'register' }" @click="authMode = 'register'">Register</button>
+        </div>
+        <form v-if="authMode === 'login'" class="login-card" @submit.prevent="login">
           <label>
-            <span>手机号</span>
-            <input v-model="loginForm.mobile" inputmode="tel" autocomplete="tel" placeholder="请输入手机号" />
+            <span>鎵嬫満鍙</span>
+            <input v-model="loginForm.mobile" inputmode="tel" autocomplete="tel" placeholder="璇疯緭鍏ユ墜鏈哄彿" />
           </label>
           <label>
-            <span>密码</span>
-            <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+            <span>瀵嗙爜</span>
+            <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="Password" />
           </label>
-          <button class="primary wide" type="submit">登录</button>
-          <button class="ghost wide" type="button" @click="navigate('home')">先去逛逛</button>
-          <p class="demo-account">测试账号：13800000001 / user123</p>
+          <button class="primary wide" type="submit">鐧诲綍</button>
+          <button class="ghost wide" type="button" @click="navigate('home')">鍏堝幓閫涢€</button>
+          <p class="demo-account">娴嬭瘯璐﹀彿锛?3800000001 / user123</p>
+        </form>
+        <form v-else class="login-card" @submit.prevent="register">
+          <label>
+            <span>Mobile</span>
+            <input v-model="registerForm.mobile" inputmode="tel" autocomplete="tel" placeholder="Mobile number" />
+          </label>
+          <label>
+            <span>Nickname</span>
+            <input v-model="registerForm.nickname" autocomplete="nickname" placeholder="Nickname" />
+          </label>
+          <label>
+            <span>Password</span>
+            <input v-model="registerForm.password" type="password" autocomplete="new-password" placeholder="Password" />
+          </label>
+          <button class="primary wide" type="submit">Register</button>
+          <button class="ghost wide" type="button" @click="navigate('home')">Browse first</button>
         </form>
       </section>
 
@@ -425,30 +519,30 @@ onMounted(loadHome);
         <div class="home-top">
           <div>
             <span>DWK Shop</span>
-            <h1>精选好物</h1>
+            <h1>绮鹃€夊ソ鐗</h1>
           </div>
           <button class="round-btn" @click="loggedIn ? navigate('orders') : openLogin({ view: 'orders', params: {} })">
-            {{ loggedIn ? '订单' : '登录' }}
+            {{ loggedIn ? '璁㈠崟' : '鐧诲綍' }}
           </button>
         </div>
         <form class="search-bar" @submit.prevent="submitSearch">
-          <input v-model="searchKeyword" placeholder="搜索商品、品牌" />
-          <button type="submit">搜索</button>
+          <input v-model="searchKeyword" placeholder="Search products" />
+          <button type="submit">鎼滅储</button>
         </form>
         <section class="hero-card">
-          <span>夏季焕新季</span>
-          <strong>好物低至 5 折</strong>
-          <p>从商品浏览到下单支付，一站式体验。</p>
+          <span>澶忓鐒曟柊瀛</span>
+          <strong>濂界墿浣庤嚦 5 鎶</strong>
+          <p>浠庡晢鍝佹祻瑙堝埌涓嬪崟鏀粯锛屼竴绔欏紡浣撻獙銆</p>
         </section>
         <section class="shortcut-grid">
-          <button @click="navigate('category')">分类</button>
-          <button @click="navigate('search')">搜索</button>
-          <button @click="navigate('cart')">购物车</button>
-          <button @click="navigate('orders')">订单</button>
+          <button @click="navigate('category')">鍒嗙被</button>
+          <button @click="navigate('search')">鎼滅储</button>
+          <button @click="navigate('cart')">璐墿杞</button>
+          <button @click="navigate('orders')">璁㈠崟</button>
         </section>
         <div class="section-title">
-          <h2>精选推荐</h2>
-          <button @click="loadHome">刷新</button>
+          <h2>绮鹃€夋帹鑽</h2>
+          <button @click="loadHome">鍒锋柊</button>
         </div>
         <div class="product-grid">
           <article v-for="product in products" :key="product.id" class="product-card" @click="navigate('detail', { id: product.id })">
@@ -456,8 +550,8 @@ onMounted(loadHome);
             <div class="product-info">
               <strong>{{ product.name }}</strong>
               <span>{{ product.subtitle }}</span>
-              <div class="tags"><em>{{ productTag(product) }}</em><em>已售 {{ product.displayedSales }}</em></div>
-              <div class="price">¥{{ product.minSalePriceText }}</div>
+              <div class="tags"><em>{{ productTag(product) }}</em><em>宸插敭 {{ product.displayedSales }}</em></div>
+              <div class="price">楼{{ product.minSalePriceText }}</div>
             </div>
           </article>
         </div>
@@ -465,7 +559,7 @@ onMounted(loadHome);
 
       <section v-else-if="route.view === 'category'" class="view category-layout">
         <aside>
-          <button :class="{ active: activeCategoryId === null }" @click="selectCategory(null)">全部</button>
+          <button :class="{ active: activeCategoryId === null }" @click="selectCategory(null)">鍏ㄩ儴</button>
           <button v-for="category in categories" :key="category.id" :class="{ active: activeCategoryId === category.id }" @click="selectCategory(category.id)">
             {{ category.name }}
           </button>
@@ -475,8 +569,8 @@ onMounted(loadHome);
             <div class="small-visual" :class="imageTone(product.id)">{{ product.name.slice(0, 1) }}</div>
             <div>
               <strong>{{ product.name }}</strong>
-              <span>{{ productTag(product) }} · 已售 {{ product.displayedSales }}</span>
-              <p>¥{{ product.minSalePriceText }}</p>
+              <span>{{ productTag(product) }} 路 宸插敭 {{ product.displayedSales }}</span>
+              <p>楼{{ product.minSalePriceText }}</p>
             </div>
           </article>
         </div>
@@ -484,27 +578,27 @@ onMounted(loadHome);
 
       <section v-else-if="route.view === 'search'" class="view">
         <form class="search-bar sticky" @submit.prevent="submitSearch">
-          <input v-model="searchKeyword" placeholder="输入关键词搜索" />
-          <button type="submit">搜索</button>
+          <input v-model="searchKeyword" placeholder="Search keyword" />
+          <button type="submit">鎼滅储</button>
         </form>
-        <div v-if="searchResults.length === 0" class="empty-state">暂无搜索结果</div>
+        <div v-if="searchResults.length === 0" class="empty-state">鏆傛棤鎼滅储缁撴灉</div>
         <article v-for="product in searchResults" :key="product.id" class="list-product" @click="navigate('detail', { id: product.id })">
           <div class="small-visual" :class="imageTone(product.id)">{{ product.name.slice(0, 1) }}</div>
           <div>
             <strong>{{ product.name }}</strong>
             <span>{{ product.subtitle }}</span>
-            <p>¥{{ product.minSalePriceText }}</p>
+            <p>楼{{ product.minSalePriceText }}</p>
           </div>
         </article>
       </section>
 
       <section v-else-if="route.view === 'discover'" class="view">
         <section class="hero-card subtle">
-          <span>发现</span>
-          <strong>新品、冷链、搭配购</strong>
-          <p>这里聚合搜索、活动和推荐入口。</p>
+          <span>鍙戠幇</span>
+          <strong>鏂板搧銆佸喎閾俱€佹惌閰嶈喘</strong>
+          <p>杩欓噷鑱氬悎鎼滅储銆佹椿鍔ㄥ拰鎺ㄨ崘鍏ュ彛銆</p>
         </section>
-        <button class="primary wide" @click="navigate('search')">去搜索商品</button>
+        <button class="primary wide" @click="navigate('search')">鍘绘悳绱㈠晢鍝</button>
       </section>
 
       <section v-else-if="route.view === 'detail' && productDetail" class="view detail-view">
@@ -513,10 +607,10 @@ onMounted(loadHome);
           <span v-if="productDetail.offSale">{{ productDetail.offSaleMessage }}</span>
           <h1>{{ productDetail.name }}</h1>
           <p>{{ productDetail.subtitle }}</p>
-          <strong>¥{{ currentSku?.salePriceText ?? productDetail.minSalePriceText }}</strong>
+          <strong>楼{{ currentSku?.salePriceText ?? productDetail.minSalePriceText }}</strong>
         </div>
         <section class="panel">
-          <h2>选择规格</h2>
+          <h2>閫夋嫨瑙勬牸</h2>
           <div class="sku-list">
             <button
               v-for="sku in productDetail.skus"
@@ -525,7 +619,7 @@ onMounted(loadHome);
               :class="{ active: selectedSkuId === sku.id }"
               @click="selectedSkuId = sku.id"
             >
-              {{ sku.skuName }} <span>{{ sku.stock > 0 ? `库存 ${sku.stock}` : '售罄' }}</span>
+              {{ sku.skuName }} <span>{{ sku.stock > 0 ? `搴撳瓨 ${sku.stock}` : '鍞絼' }}</span>
             </button>
           </div>
         </section>
@@ -534,7 +628,7 @@ onMounted(loadHome);
           <p>{{ productDetail.noticeContent }}</p>
         </section>
         <div class="quantity-row">
-          <span>数量</span>
+          <span>鏁伴噺</span>
           <div class="stepper">
             <button @click="selectedQuantity = Math.max(1, selectedQuantity - 1)">-</button>
             <strong>{{ selectedQuantity }}</strong>
@@ -542,13 +636,13 @@ onMounted(loadHome);
           </div>
         </div>
         <footer class="action-bar">
-          <button class="ghost" :disabled="!productDetail.allowCart || productDetail.offSale" @click="addCurrentSkuToCart">加入购物车</button>
-          <button class="primary" :disabled="productDetail.offSale" @click="buyNow">立即购买</button>
+          <button class="ghost" :disabled="!productDetail.allowCart || productDetail.offSale" @click="addCurrentSkuToCart">鍔犲叆璐墿杞</button>
+          <button class="primary" :disabled="productDetail.offSale" @click="buyNow">绔嬪嵆璐拱</button>
         </footer>
       </section>
 
       <section v-else-if="route.view === 'cart'" class="view cart-view">
-        <div v-if="!cart || cart.items.length === 0" class="empty-state">购物车还是空的</div>
+        <div v-if="!cart || cart.items.length === 0" class="empty-state">璐墿杞﹁繕鏄┖鐨</div>
         <article v-for="item in cart?.items" :key="item.id" class="cart-item">
           <input type="checkbox" :checked="item.checked" :disabled="!item.canCheck" @change="toggleCartItem(item.id, ($event.target as HTMLInputElement).checked)" />
           <div class="small-visual" :class="imageTone(item.productId)">{{ item.productName?.slice(0, 1) }}</div>
@@ -557,20 +651,20 @@ onMounted(loadHome);
             <span>{{ item.skuName }}</span>
             <em v-if="item.status !== 'NORMAL'">{{ item.statusMessage }}</em>
             <div class="cart-bottom">
-              <p>¥{{ item.salePriceText }}</p>
+              <p>楼{{ item.salePriceText }}</p>
               <div class="stepper">
                 <button @click="changeCartQuantity(item.id, item.quantity - 1)">-</button>
                 <strong>{{ item.quantity }}</strong>
                 <button @click="changeCartQuantity(item.id, item.quantity + 1)">+</button>
               </div>
-              <button class="text-danger" @click="removeCartItem(item.id)">删除</button>
+              <button class="text-danger" @click="removeCartItem(item.id)">鍒犻櫎</button>
             </div>
           </div>
         </article>
         <footer class="cart-bar">
-          <label><input type="checkbox" :checked="allCartChecked" @change="toggleAllCartItems" /> 全选</label>
-          <div><span>合计</span><strong>¥{{ cart?.estimatedAmountText ?? '0' }}</strong></div>
-          <button class="primary" @click="openCartConfirm">去结算</button>
+          <label><input type="checkbox" :checked="allCartChecked" @change="toggleAllCartItems" /> 鍏ㄩ€</label>
+          <div><span>鍚堣</span><strong>楼{{ cart?.estimatedAmountText ?? '0' }}</strong></div>
+          <button class="primary" @click="openCartConfirm">鍘荤粨绠</button>
         </footer>
       </section>
 
@@ -584,70 +678,70 @@ onMounted(loadHome);
             <div class="small-visual" :class="imageTone(item.productId)">{{ item.productName.slice(0, 1) }}</div>
             <div>
               <strong>{{ item.productName }}</strong>
-              <span>{{ item.skuName }} × {{ item.quantity }}</span>
-              <p>¥{{ item.totalAmountText }}</p>
-              <em v-if="item.noticeTitle">{{ item.noticeTitle }}：{{ item.noticeContent }}</em>
+              <span>{{ item.skuName }} 脳 {{ item.quantity }}</span>
+              <p>楼{{ item.totalAmountText }}</p>
+              <em v-if="item.noticeTitle">{{ item.noticeTitle }}锛歿{ item.noticeContent }}</em>
             </div>
           </article>
           <section class="panel detail-list">
-            <div><span>优惠券</span><strong>{{ confirmData.selectedCoupon ? `-¥${confirmData.selectedCoupon.discountAmountText}` : '暂无可用' }}</strong></div>
+            <div><span>Coupon</span><strong>{{ confirmData.selectedCoupon ? '-楼' + confirmData.selectedCoupon.discountAmountText : 'None' }}</strong></div>
             <div v-if="confirmData.pointDeduction.visible" @click="toggleUsePoints">
-              <span>积分抵扣</span><strong>{{ confirmData.pointDeduction.selected ? `-¥${confirmData.pointDeduction.deductionAmountText}` : '未使用' }}</strong>
+              <span>Points</span><strong>{{ confirmData.pointDeduction.selected ? '-楼' + confirmData.pointDeduction.deductionAmountText : 'Unused' }}</strong>
             </div>
-            <div><span>运费</span><strong>¥{{ confirmData.freightAmountText }}</strong></div>
+            <div><span>Freight</span><strong>楼{{ confirmData.freightAmountText }}</strong></div>
           </section>
           <section class="panel detail-list">
-            <div><span>商品金额</span><strong>¥{{ confirmData.amount.productAmountText }}</strong></div>
-            <div><span>优惠金额</span><strong>-¥{{ confirmData.amount.couponDiscountAmountText }}</strong></div>
-            <div><span>积分抵扣</span><strong>-¥{{ confirmData.amount.pointDiscountAmountText }}</strong></div>
-            <div><span>实付</span><strong class="orange">¥{{ confirmData.amount.payAmountText }}</strong></div>
+            <div><span>Products</span><strong>楼{{ confirmData.amount.productAmountText }}</strong></div>
+            <div><span>Coupon discount</span><strong>-楼{{ confirmData.amount.couponDiscountAmountText }}</strong></div>
+            <div><span>Point discount</span><strong>-楼{{ confirmData.amount.pointDiscountAmountText }}</strong></div>
+            <div><span>Pay amount</span><strong class="orange">楼{{ confirmData.amount.payAmountText }}</strong></div>
           </section>
-          <button class="primary wide" @click="submitOrder">提交订单</button>
+          <button class="primary wide" @click="submitOrder">鎻愪氦璁㈠崟</button>
         </div>
       </section>
 
       <section v-else-if="route.view === 'payment'" class="view payment-view">
         <section class="pay-amount">
-          <span>待支付</span>
-          <strong>¥{{ currentOrder?.payAmountText ?? '0' }}</strong>
+          <span>寰呮敮浠</span>
+          <strong>楼{{ currentOrder?.payAmountText ?? '0' }}</strong>
           <p>{{ currentOrder?.orderNo }}</p>
         </section>
         <section class="panel payment-methods">
-          <label><input type="radio" checked /> 模拟微信支付</label>
-          <label><input type="radio" /> 模拟支付宝支付</label>
+          <label><input type="radio" checked /> 妯℃嫙寰俊鏀粯</label>
+          <label><input type="radio" /> 妯℃嫙鏀粯瀹濇敮浠</label>
         </section>
-        <button class="primary wide" @click="simulatePaySuccess">立即支付</button>
+        <button class="primary wide" @click="simulatePaySuccess">绔嬪嵆鏀粯</button>
         <p v-if="paymentMessage" class="success-text">{{ paymentMessage }}</p>
-        <button class="ghost wide" @click="currentOrder && navigate('order-detail', { id: currentOrder.id })">查看订单</button>
+        <button class="ghost wide" @click="currentOrder && navigate('order-detail', { id: currentOrder.id })">鏌ョ湅璁㈠崟</button>
       </section>
 
       <section v-else-if="route.view === 'orders'" class="view">
-        <div v-if="orders.length === 0" class="empty-state">暂无订单</div>
+        <div v-if="orders.length === 0" class="empty-state">鏆傛棤璁㈠崟</div>
         <article v-for="order in orders" :key="order.id" class="order-card" @click="navigate('order-detail', { id: order.id })">
           <div><strong>{{ order.orderNo }}</strong><span>{{ statusText(order.orderStatus) }}</span></div>
-          <p>实付 ¥{{ order.payAmountText }}</p>
+          <p>瀹炰粯 楼{{ order.payAmountText }}</p>
         </article>
       </section>
 
       <section v-else-if="route.view === 'order-detail' && currentOrder" class="view">
         <section class="panel detail-list">
-          <div><span>订单状态</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
-          <div><span>订单编号</span><strong>{{ currentOrder.orderNo }}</strong></div>
-          <div><span>收货信息</span><strong>{{ currentOrder.receiverName }} {{ currentOrder.receiverMobile }}</strong></div>
+          <div><span>璁㈠崟鐘舵€</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
+          <div><span>璁㈠崟缂栧彿</span><strong>{{ currentOrder.orderNo }}</strong></div>
+          <div><span>鏀惰揣淇℃伅</span><strong>{{ currentOrder.receiverName }} {{ currentOrder.receiverMobile }}</strong></div>
           <p>{{ currentOrder.receiverAddress }}</p>
         </section>
         <article v-for="item in currentOrder.items" :key="item.id" class="order-line">
           <div class="small-visual" :class="imageTone(item.productId)">{{ item.productName.slice(0, 1) }}</div>
           <div>
             <strong>{{ item.productName }}</strong>
-            <span>{{ item.skuName }} × {{ item.quantity }}</span>
-            <p>¥{{ item.payAmountText }}</p>
+            <span>{{ item.skuName }} 脳 {{ item.quantity }}</span>
+            <p>楼{{ item.payAmountText }}</p>
           </div>
         </article>
         <section class="panel detail-list">
-          <div><span>实付金额</span><strong class="orange">¥{{ currentOrder.payAmountText }}</strong></div>
+          <div><span>瀹炰粯閲戦</span><strong class="orange">楼{{ currentOrder.payAmountText }}</strong></div>
         </section>
-        <button v-if="currentOrder.orderStatus === 'WAIT_PAY'" class="ghost wide" @click="cancelCurrentOrder(currentOrder.id)">取消订单</button>
+        <button v-if="currentOrder.orderStatus === 'WAIT_PAY'" class="ghost wide" @click="cancelCurrentOrder(currentOrder.id)">鍙栨秷璁㈠崟</button>
       </section>
 
       <section v-else-if="route.view === 'mine'" class="view mine-view">
@@ -655,35 +749,52 @@ onMounted(loadHome);
           <div class="avatar">{{ userAvatarText }}</div>
           <div>
             <strong>{{ userDisplayName }}</strong>
-            <span>普通会员</span>
+            <span>鏅€氫細鍛</span>
           </div>
-          <button class="logout-btn" @click="logout">退出</button>
+          <button class="logout-btn" @click="logout">閫€鍑</button>
         </section>
         <section class="stats">
-          <button @click="navigate('orders')"><strong>订单</strong><span>查看全部</span></button>
-          <button @click="navigate('cart')"><strong>{{ cartBadge }}</strong><span>购物车</span></button>
-          <button><strong>5000</strong><span>积分</span></button>
+          <button @click="navigate('orders')"><strong>璁㈠崟</strong><span>鏌ョ湅鍏ㄩ儴</span></button>
+          <button @click="navigate('cart')"><strong>{{ cartBadge }}</strong><span>璐墿杞</span></button>
+          <button><strong>5000</strong><span>绉垎</span></button>
         </section>
         <section class="panel menu-list">
-          <button @click="navigate('orders')">我的订单</button>
-          <button @click="navigate('cart')">购物车</button>
-          <button @click="navigate('search')">搜索商品</button>
+          <button @click="navigate('orders')">鎴戠殑璁㈠崟</button>
+          <button @click="navigate('cart')">璐墿杞</button>
+          <button @click="navigate('search')">鎼滅储鍟嗗搧</button>
+          <button @click="showPasswordPanel = !showPasswordPanel">Change password</button>
         </section>
+        <form v-if="showPasswordPanel" class="panel password-panel" @submit.prevent="changePassword">
+          <label>
+            <span>Old password</span>
+            <input v-model="passwordForm.oldPassword" type="password" autocomplete="current-password" />
+          </label>
+          <label>
+            <span>New password</span>
+            <input v-model="passwordForm.newPassword" type="password" autocomplete="new-password" />
+          </label>
+          <label>
+            <span>Confirm password</span>
+            <input v-model="passwordForm.confirmPassword" type="password" autocomplete="new-password" />
+          </label>
+          <button class="primary wide" type="submit">Save password</button>
+        </form>
       </section>
 
-      <div v-if="loading" class="loading-mask">加载中...</div>
+      <div v-if="loading" class="loading-mask">鍔犺浇涓?..</div>
       <div v-if="error" class="error-box">
         <span>{{ error }}</span>
-        <button @click="error = ''">知道了</button>
+        <button @click="error = ''">鐭ラ亾浜</button>
       </div>
     </section>
 
     <nav v-if="route.view !== 'login'" class="tabbar">
-      <button :class="{ active: route.view === 'home' }" @click="navigate('home')">首页</button>
-      <button :class="{ active: route.view === 'category' }" @click="navigate('category')">分类</button>
-      <button :class="{ active: route.view === 'discover' || route.view === 'search' }" @click="navigate('discover')">发现</button>
-      <button :class="{ active: route.view === 'cart' }" @click="navigate('cart')">购物车<span v-if="cartBadge">{{ cartBadge }}</span></button>
-      <button :class="{ active: route.view === 'mine' }" @click="navigate('mine')">我的</button>
+      <button :class="{ active: route.view === 'home' }" @click="navigate('home')">棣栭〉</button>
+      <button :class="{ active: route.view === 'category' }" @click="navigate('category')">鍒嗙被</button>
+      <button :class="{ active: route.view === 'discover' || route.view === 'search' }" @click="navigate('discover')">鍙戠幇</button>
+      <button :class="{ active: route.view === 'cart' }" @click="navigate('cart')">Cart <span v-if="cartBadge">{{ cartBadge }}</span></button>
+      <button :class="{ active: route.view === 'mine' }" @click="navigate('mine')">鎴戠殑</button>
     </nav>
   </main>
 </template>
+

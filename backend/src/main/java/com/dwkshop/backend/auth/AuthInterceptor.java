@@ -22,7 +22,7 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
 
         String path = request.getRequestURI();
-        if (path.startsWith("/admin/") && !path.equals("/admin/auth/login")) {
+        if (path.startsWith("/admin/") && requiresAdminAccess(path)) {
             AuthPrincipal principal = AuthContext.current()
                 .filter(AuthPrincipal::isAdmin)
                 .orElseThrow(() -> new AuthException("请先登录后台"));
@@ -45,5 +45,11 @@ public class AuthInterceptor implements HandlerInterceptor {
             return authorization.substring(7);
         }
         return authorization;
+    }
+
+    private boolean requiresAdminAccess(String path) {
+        return !path.equals("/admin/auth/login")
+            && !path.equals("/admin/auth/refresh")
+            && !path.equals("/admin/auth/logout");
     }
 }

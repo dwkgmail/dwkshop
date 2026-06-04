@@ -328,7 +328,7 @@ onMounted(loadHome);
       <section v-if="route.view === 'home'" class="view">
         <div class="home-top">
           <div>
-            <span>福客满商城</span>
+            <span>DWK Shop</span>
             <h1>精选好物</h1>
           </div>
           <button class="round-btn" @click="navigate('orders')">订单</button>

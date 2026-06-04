@@ -379,7 +379,7 @@ onMounted(() => {
   <main v-if="!loggedIn" class="login-page">
     <section class="login-card">
       <div class="login-brand">
-        <span>福客满</span>
+        <span>DWK Shop</span>
         <h1>电商管理后台</h1>
         <p>商品、订单与运营数据管理</p>
       </div>
@@ -400,7 +400,7 @@ onMounted(() => {
   <main v-else class="admin-layout">
     <div v-if="toast" class="toast">{{ toast }}</div>
     <aside class="sidebar">
-      <div class="brand">福客满后台</div>
+      <div class="brand">DWK Shop 后台</div>
       <nav>
         <button v-for="item in menu" :key="item.key" :class="{ active: page === item.key || (item.key === 'products' && page.startsWith('product')) || (item.key === 'orders' && page.startsWith('order')) }" @click="nav(item.key)">
           {{ item.label }}

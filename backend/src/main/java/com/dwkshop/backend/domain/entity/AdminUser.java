@@ -2,6 +2,8 @@ package com.dwkshop.backend.domain.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
@@ -13,22 +15,21 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "`user`")
-public class User {
+@Table(name = "admin_user")
+public class AdminUser {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 20)
-    private String mobile;
-
-    @Column(nullable = false, length = 64)
-    private String nickname;
-
-    private String avatarUrl;
+    @Column(nullable = false, unique = true, length = 64)
+    private String username;
 
     @Column(nullable = false)
     private String passwordHash;
+
+    @Column(nullable = false, length = 64)
+    private String displayName;
 
     @Column(nullable = false, length = 20)
     private String status;

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { loginAdmin } from './api/auth';
+import { clearAuthToken, getAuthToken, setAuthToken } from './api/client';
 import {
   createProduct,
   getAdminProducts,
@@ -25,7 +27,7 @@ type Page =
   | 'order-detail'
   | 'placeholder';
 
-const loggedIn = ref(localStorage.getItem('dwkshop-admin-login') === '1');
+const loggedIn = ref(Boolean(getAuthToken()));
 const loginForm = reactive({ username: 'admin', password: 'admin123' });
 const page = ref<Page>('dashboard');
 const placeholderTitle = ref('');
@@ -138,15 +140,19 @@ async function runTask(task: () => Promise<void>) {
   }
 }
 
-function login() {
-  loggedIn.value = true;
-  localStorage.setItem('dwkshop-admin-login', '1');
-  loadDashboard();
+async function login() {
+  await runTask(async () => {
+    const result = await loginAdmin(loginForm.username, loginForm.password);
+    setAuthToken(result.token);
+    loggedIn.value = true;
+    showToast(`欢迎回来，${result.name}`);
+    await loadDashboard();
+  });
 }
 
 function logout() {
   loggedIn.value = false;
-  localStorage.removeItem('dwkshop-admin-login');
+  clearAuthToken();
 }
 
 function nav(key: string) {
@@ -392,7 +398,7 @@ onMounted(() => {
           密码
           <input v-model="loginForm.password" type="password" />
         </label>
-        <button class="primary wide" type="submit">模拟登录</button>
+        <button class="primary wide" type="submit">登录</button>
       </form>
     </section>
   </main>

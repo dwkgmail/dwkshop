@@ -105,6 +105,37 @@ class BackendApplicationTests {
     }
 
     @Test
+    void adminLoginReturnsTokenAndRejectsWrongPassword() throws Exception {
+        String payload = """
+            {
+              "username": "admin",
+              "password": "admin123"
+            }
+            """;
+        mockMvc.perform(post("/admin/auth/login").contentType("application/json").content(payload))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.token").isNotEmpty())
+            .andExpect(jsonPath("$.role").value("ADMIN"));
+
+        String wrongPayload = """
+            {
+              "username": "admin",
+              "password": "wrong"
+            }
+            """;
+        mockMvc.perform(post("/admin/auth/login").contentType("application/json").content(wrongPayload))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.message").value("账号或密码错误"));
+    }
+
+    @Test
+    void adminProductsRequiresLogin() throws Exception {
+        mockMvc.perform(get("/admin/products"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.message").value("请先登录后台"));
+    }
+
+    @Test
     void adminCanCreateProductWithZeroSalesAndUnselectableZeroStockSku() throws Exception {
         String payload = """
             {
@@ -129,7 +160,10 @@ class BackendApplicationTests {
             }
             """;
 
-        mockMvc.perform(post("/admin/products").contentType("application/json").content(payload))
+        mockMvc.perform(post("/admin/products")
+                .header("Authorization", "Bearer " + adminToken())
+                .contentType("application/json")
+                .content(payload))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.displayedSales").value(0))
             .andExpect(jsonPath("$.pointDeductEnabled").value(true))
@@ -381,6 +415,19 @@ class BackendApplicationTests {
 
         Integer cartCount = jdbcTemplate.queryForObject("select count(*) from cart_item where user_id = 1", Integer.class);
         assertThat(cartCount).isEqualTo(1);
+    }
+
+    private String adminToken() throws Exception {
+        String payload = """
+            {
+              "username": "admin",
+              "password": "admin123"
+            }
+            """;
+        MvcResult result = mockMvc.perform(post("/admin/auth/login").contentType("application/json").content(payload))
+            .andExpect(status().isOk())
+            .andReturn();
+        return com.jayway.jsonpath.JsonPath.read(result.getResponse().getContentAsString(), "$.token");
     }
 
     private void clearCart() {

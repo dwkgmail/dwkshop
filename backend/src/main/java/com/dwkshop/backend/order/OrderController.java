@@ -1,5 +1,6 @@
 package com.dwkshop.backend.order;
 
+import com.dwkshop.backend.auth.AuthContext;
 import com.dwkshop.backend.order.dto.ConfirmOrderRequest;
 import com.dwkshop.backend.order.dto.ConfirmOrderResponse;
 import com.dwkshop.backend.order.dto.CreateOrderRequest;
@@ -59,6 +60,9 @@ public class OrderController {
     }
 
     private Long resolveUserId(Long userId) {
-        return userId == null ? DEFAULT_USER_ID : userId;
+        if (userId != null) {
+            return userId;
+        }
+        return AuthContext.currentUserId().orElse(DEFAULT_USER_ID);
     }
 }

@@ -25,3 +25,8 @@ management:
     web:
       exposure:
         include: health,info
+
+dwkshop:
+  auth:
+    secret: ${DWKSHOP_AUTH_SECRET:dwkshop-local-dev-secret-change-me}
+    ttl-seconds: 86400

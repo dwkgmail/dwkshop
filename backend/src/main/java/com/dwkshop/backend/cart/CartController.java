@@ -1,5 +1,6 @@
 package com.dwkshop.backend.cart;
 
+import com.dwkshop.backend.auth.AuthContext;
 import com.dwkshop.backend.cart.dto.AddCartItemRequest;
 import com.dwkshop.backend.cart.dto.CartResponse;
 import com.dwkshop.backend.cart.dto.CheckedRequest;
@@ -28,8 +29,8 @@ public class CartController {
     }
 
     @GetMapping
-    public CartResponse listItems(@RequestParam(defaultValue = "1") Long userId) {
-        return cartService.listItems(userId);
+    public CartResponse listItems(@RequestParam(required = false) Long userId) {
+        return cartService.listItems(resolveUserId(userId));
     }
 
     @PostMapping
@@ -72,6 +73,9 @@ public class CartController {
     }
 
     private Long resolveUserId(Long userId) {
-        return userId == null ? DEFAULT_USER_ID : userId;
+        if (userId != null) {
+            return userId;
+        }
+        return AuthContext.currentUserId().orElse(DEFAULT_USER_ID);
     }
 }

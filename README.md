@@ -81,7 +81,7 @@ npm run dev
 
 访问地址：`http://localhost:5174`
 
-管理后台 Vite 会把 `/api` 和 `/admin` 代理到 `http://localhost:8080`。后台当前为模拟登录，默认表单值为：
+管理后台 Vite 会把 `/api` 和 `/admin` 代理到 `http://localhost:8080`。后台已接入登录接口，默认表单值为：
 
 - 账号：`admin`
 - 密码：`admin123`
@@ -125,7 +125,7 @@ npm run build
 
 管理后台：
 
-- 模拟登录
+- 管理员登录和后台接口 Token 鉴权
 - 工作台指标
 - 商品列表、筛选、新增、编辑、上下架
 - SKU 编辑
@@ -140,6 +140,7 @@ npm run build
 - `backend/src/main/resources/db/migration/V1__create_mvp_tables.sql`
 - `backend/src/main/resources/db/migration/V2__seed_mvp_data.sql`
 - `backend/src/main/resources/db/migration/V3__add_product_notice.sql`
+- `backend/src/main/resources/db/migration/V4__add_login_accounts.sql`
 
 主要数据表：
 
@@ -157,12 +158,14 @@ npm run build
 - `coupon_user`：用户优惠券
 - `user_point_account`：用户积分账户
 - `user_point_flow`：用户积分流水
+- `admin_user`：后台管理员账号
 
 金额字段统一使用“分”为计算单位，例如 `169900` 表示 `1699.00` 元。接口响应通常同时返回原始金额和展示金额，例如 `salePrice=520`、`salePriceText=5.2`。
 
 ## 初始化测试数据
 
-- 测试用户：`13800000001`，昵称 `测试用户`
+- 测试用户：`13800000001`，密码 `user123`，昵称 `测试用户`
+- 后台管理员：`admin`，密码 `admin123`
 - 默认地址：北京市朝阳区望京测试路 100 号
 - 普通商品：`Apple AirPods Pro 第二代`
 - 冷链商品：`澳洲冷链牛排套餐`
@@ -174,13 +177,26 @@ npm run build
 - 满减优惠券：`满1000减100优惠券`
 - 用户积分账户：可用积分 `5000`
 
-当前尚未接入真实登录体系，购物车和订单接口默认使用初始化用户 `userId=1`，也可以通过 query 参数传入 `userId`。
+购物车和订单接口会优先使用 `Authorization: Bearer <token>` 中的登录用户；未携带 Token 时仍兼容初始化用户 `userId=1`，也可以通过 query 参数传入 `userId`。
 
 ## API 概览
 
 ### 健康检查
 
 - `GET /api/health`
+
+### 登录接口
+
+- `POST /api/auth/login`：用户登录，请求体示例 `{"mobile":"13800000001","password":"user123"}`
+- `POST /admin/auth/login`：后台管理员登录，请求体示例 `{"username":"admin","password":"admin123"}`
+
+登录成功后返回 `token`、`tokenType`、`expiresIn`、`id`、`name` 和 `role`。需要鉴权的接口请在请求头中携带：
+
+```text
+Authorization: Bearer <token>
+```
+
+`/admin/**` 除 `/admin/auth/login` 外均要求管理员 Token。
 
 ### 商品接口
 
@@ -264,4 +280,3 @@ SKU 库存为 `0` 或 SKU 禁用时，接口返回 `selectable=false`。
 
 - `docs/design-mvp.md`
 - `电商系统设计稿_完整版.docx`
-

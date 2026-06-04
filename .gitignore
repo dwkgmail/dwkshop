@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Frontend build output
+dist/
+*.tsbuildinfo
+
+# Backend build output
+target/
+
+# Logs
+*.log
+
+# Local IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Playwright MCP artifacts
+.playwright-mcp/

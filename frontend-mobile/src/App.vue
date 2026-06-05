@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { changeUserPassword, loginUser, logoutUser, registerUser } from './api/auth';
 import { createAftersale } from './api/aftersales';
@@ -81,7 +81,7 @@ const orders = ref<OrderSummary[]>([]);
 const paymentMessage = ref('');
 
 const cartBadge = computed(() => (loggedIn.value ? cart.value?.badgeCount ?? 0 : 0));
-const userDisplayName = computed(() => currentUserName.value || '娴嬭瘯鐢ㄦ埛');
+const userDisplayName = computed(() => currentUserName.value || '测试用户');
 const userAvatarText = computed(() => userDisplayName.value.slice(0, 1));
 const currentSku = computed(() => productDetail.value?.skus.find((item) => item.id === selectedSkuId.value) ?? null);
 const allCartChecked = computed(() => {
@@ -103,7 +103,7 @@ async function runTask(task: () => Promise<void>) {
   try {
     await task();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '鎿嶄綔澶辫触锛岃绋嶅悗閲嶈瘯';
+    error.value = err instanceof Error ? err.message : '操作失败，请稍后重试';
   } finally {
     loading.value = false;
   }
@@ -153,7 +153,7 @@ async function login() {
     localStorage.setItem('dwkshop-user-name', result.name);
     currentUserName.value = result.name;
     loggedIn.value = true;
-    showToast(`娆㈣繋鍥炴潵锛?{result.name}`);
+    showToast(`欢迎回来，${result.name}`);
     const target = postLoginTarget.value ?? { view: 'home' as ViewName, params: {} };
     postLoginTarget.value = null;
     navigate(target.view, target.params);
@@ -287,7 +287,7 @@ async function loadCartQuietly() {
 async function submitSearch() {
   const keyword = searchKeyword.value.trim();
   if (!keyword) {
-    showToast('璇疯緭鍏ユ悳绱㈠叧閿瘝');
+    showToast('请输入搜索关键词');
     return;
   }
   route.view = 'search';
@@ -308,7 +308,7 @@ async function addCurrentSkuToCart() {
   }
   await runTask(async () => {
     cart.value = await addCartItem(sku.id, selectedQuantity.value);
-    showToast('宸插姞鍏ヨ喘鐗╄溅');
+    showToast('已加入购物车');
   });
 }
 
@@ -476,7 +476,7 @@ onUnmounted(() => {
     <div v-if="toast" class="toast">{{ toast }}</div>
     <section class="app-content">
       <header v-if="route.view !== 'home' && route.view !== 'login'" class="page-header">
-        <button class="icon-btn" @click="navigate('home')">鈥</button>
+        <button class="icon-btn" @click="navigate('home')">&lt;</button>
         <strong>
           {{
             route.view === 'category' ? 'Category' :
@@ -496,7 +496,7 @@ onUnmounted(() => {
       <section v-if="route.view === 'login'" class="view login-view">
         <div class="login-brand">
           <span>DWK Shop</span>
-          <h1>鐢ㄦ埛鐧诲綍</h1>
+          <h1>用户登录</h1>
           <p>鐧诲綍鍚庡彲浣跨敤璐墿杞︺€佷笅鍗曞拰璁㈠崟鏌ヨ銆</p>
         </div>
         <div class="login-card auth-switch">
@@ -506,15 +506,15 @@ onUnmounted(() => {
         <form v-if="authMode === 'login'" class="login-card" @submit.prevent="login">
           <label>
             <span>鎵嬫満鍙</span>
-            <input v-model="loginForm.mobile" inputmode="tel" autocomplete="tel" placeholder="璇疯緭鍏ユ墜鏈哄彿" />
+            <input v-model="loginForm.mobile" inputmode="tel" autocomplete="tel" placeholder="请输入手机号" />
           </label>
           <label>
-            <span>瀵嗙爜</span>
+            <span>密码</span>
             <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="Password" />
           </label>
-          <button class="primary wide" type="submit">鐧诲綍</button>
+          <button class="primary wide" type="submit">登录</button>
           <button class="ghost wide" type="button" @click="navigate('home')">鍏堝幓閫涢€</button>
-          <p class="demo-account">娴嬭瘯璐﹀彿锛?3800000001 / user123</p>
+          <p class="demo-account">测试账号：13800000001 / user123</p>
         </form>
         <form v-else class="login-card" @submit.prevent="register">
           <label>
@@ -541,27 +541,27 @@ onUnmounted(() => {
             <h1>绮鹃€夊ソ鐗</h1>
           </div>
           <button class="round-btn" @click="loggedIn ? navigate('orders') : openLogin({ view: 'orders', params: {} })">
-            {{ loggedIn ? '璁㈠崟' : '鐧诲綍' }}
+            {{ loggedIn ? '订单' : '登录' }}
           </button>
         </div>
         <form class="search-bar" @submit.prevent="submitSearch">
           <input v-model="searchKeyword" placeholder="Search products" />
-          <button type="submit">鎼滅储</button>
+          <button type="submit">搜索</button>
         </form>
         <section class="hero-card">
           <span>澶忓鐒曟柊瀛</span>
-          <strong>濂界墿浣庤嚦 5 鎶</strong>
+          <strong>好物低至 5 鎶</strong>
           <p>浠庡晢鍝佹祻瑙堝埌涓嬪崟鏀粯锛屼竴绔欏紡浣撻獙銆</p>
         </section>
         <section class="shortcut-grid">
-          <button @click="navigate('category')">鍒嗙被</button>
-          <button @click="navigate('search')">鎼滅储</button>
+          <button @click="navigate('category')">分类</button>
+          <button @click="navigate('search')">搜索</button>
           <button @click="navigate('cart')">璐墿杞</button>
-          <button @click="navigate('orders')">璁㈠崟</button>
+          <button @click="navigate('orders')">订单</button>
         </section>
         <div class="section-title">
           <h2>绮鹃€夋帹鑽</h2>
-          <button @click="loadHome">鍒锋柊</button>
+          <button @click="loadHome">刷新</button>
         </div>
         <div class="product-grid">
           <article v-for="product in products" :key="product.id" class="product-card" @click="navigate('detail', { id: product.id })">
@@ -569,8 +569,8 @@ onUnmounted(() => {
             <div class="product-info">
               <strong>{{ product.name }}</strong>
               <span>{{ product.subtitle }}</span>
-              <div class="tags"><em>{{ productTag(product) }}</em><em>宸插敭 {{ product.displayedSales }}</em></div>
-              <div class="price">楼{{ product.minSalePriceText }}</div>
+              <div class="tags"><em>{{ productTag(product) }}</em><em>已售 {{ product.displayedSales }}</em></div>
+              <div class="price">¥{{ product.minSalePriceText }}</div>
             </div>
           </article>
         </div>
@@ -578,7 +578,7 @@ onUnmounted(() => {
 
       <section v-else-if="route.view === 'category'" class="view category-layout">
         <aside>
-          <button :class="{ active: activeCategoryId === null }" @click="selectCategory(null)">鍏ㄩ儴</button>
+          <button :class="{ active: activeCategoryId === null }" @click="selectCategory(null)">全部</button>
           <button v-for="category in categories" :key="category.id" :class="{ active: activeCategoryId === category.id }" @click="selectCategory(category.id)">
             {{ category.name }}
           </button>
@@ -588,8 +588,8 @@ onUnmounted(() => {
             <div class="small-visual" :class="imageTone(product.id)">{{ product.name.slice(0, 1) }}</div>
             <div>
               <strong>{{ product.name }}</strong>
-              <span>{{ productTag(product) }} 路 宸插敭 {{ product.displayedSales }}</span>
-              <p>楼{{ product.minSalePriceText }}</p>
+              <span>{{ productTag(product) }} · 已售 {{ product.displayedSales }}</span>
+              <p>¥{{ product.minSalePriceText }}</p>
             </div>
           </article>
         </div>
@@ -598,22 +598,22 @@ onUnmounted(() => {
       <section v-else-if="route.view === 'search'" class="view">
         <form class="search-bar sticky" @submit.prevent="submitSearch">
           <input v-model="searchKeyword" placeholder="Search keyword" />
-          <button type="submit">鎼滅储</button>
+          <button type="submit">搜索</button>
         </form>
-        <div v-if="searchResults.length === 0" class="empty-state">鏆傛棤鎼滅储缁撴灉</div>
+        <div v-if="searchResults.length === 0" class="empty-state">暂无搜索结果</div>
         <article v-for="product in searchResults" :key="product.id" class="list-product" @click="navigate('detail', { id: product.id })">
           <div class="small-visual" :class="imageTone(product.id)">{{ product.name.slice(0, 1) }}</div>
           <div>
             <strong>{{ product.name }}</strong>
             <span>{{ product.subtitle }}</span>
-            <p>楼{{ product.minSalePriceText }}</p>
+            <p>¥{{ product.minSalePriceText }}</p>
           </div>
         </article>
       </section>
 
       <section v-else-if="route.view === 'discover'" class="view">
         <section class="hero-card subtle">
-          <span>鍙戠幇</span>
+          <span>发现</span>
           <strong>鏂板搧銆佸喎閾俱€佹惌閰嶈喘</strong>
           <p>杩欓噷鑱氬悎鎼滅储銆佹椿鍔ㄥ拰鎺ㄨ崘鍏ュ彛銆</p>
         </section>
@@ -626,10 +626,10 @@ onUnmounted(() => {
           <span v-if="productDetail.offSale">{{ productDetail.offSaleMessage }}</span>
           <h1>{{ productDetail.name }}</h1>
           <p>{{ productDetail.subtitle }}</p>
-          <strong>楼{{ currentSku?.salePriceText ?? productDetail.minSalePriceText }}</strong>
+          <strong>¥{{ currentSku?.salePriceText ?? productDetail.minSalePriceText }}</strong>
         </div>
         <section class="panel">
-          <h2>閫夋嫨瑙勬牸</h2>
+          <h2>选择规格</h2>
           <div class="sku-list">
             <button
               v-for="sku in productDetail.skus"
@@ -638,7 +638,7 @@ onUnmounted(() => {
               :class="{ active: selectedSkuId === sku.id }"
               @click="selectedSkuId = sku.id"
             >
-              {{ sku.skuName }} <span>{{ sku.stock > 0 ? `搴撳瓨 ${sku.stock}` : '鍞絼' }}</span>
+              {{ sku.skuName }} <span>{{ sku.stock > 0 ? `库存 ${sku.stock}` : '售罄' }}</span>
             </button>
           </div>
         </section>
@@ -647,7 +647,7 @@ onUnmounted(() => {
           <p>{{ productDetail.noticeContent }}</p>
         </section>
         <div class="quantity-row">
-          <span>鏁伴噺</span>
+          <span>数量</span>
           <div class="stepper">
             <button @click="selectedQuantity = Math.max(1, selectedQuantity - 1)">-</button>
             <strong>{{ selectedQuantity }}</strong>
@@ -656,7 +656,7 @@ onUnmounted(() => {
         </div>
         <footer class="action-bar">
           <button class="ghost" :disabled="!productDetail.allowCart || productDetail.offSale" @click="addCurrentSkuToCart">鍔犲叆璐墿杞</button>
-          <button class="primary" :disabled="productDetail.offSale" @click="buyNow">绔嬪嵆璐拱</button>
+          <button class="primary" :disabled="productDetail.offSale" @click="buyNow">立即购买</button>
         </footer>
       </section>
 
@@ -670,19 +670,19 @@ onUnmounted(() => {
             <span>{{ item.skuName }}</span>
             <em v-if="item.status !== 'NORMAL'">{{ item.statusMessage }}</em>
             <div class="cart-bottom">
-              <p>楼{{ item.salePriceText }}</p>
+              <p>¥{{ item.salePriceText }}</p>
               <div class="stepper">
                 <button @click="changeCartQuantity(item.id, item.quantity - 1)">-</button>
                 <strong>{{ item.quantity }}</strong>
                 <button @click="changeCartQuantity(item.id, item.quantity + 1)">+</button>
               </div>
-              <button class="text-danger" @click="removeCartItem(item.id)">鍒犻櫎</button>
+              <button class="text-danger" @click="removeCartItem(item.id)">删除</button>
             </div>
           </div>
         </article>
         <footer class="cart-bar">
           <label><input type="checkbox" :checked="allCartChecked" @change="toggleAllCartItems" /> 鍏ㄩ€</label>
-          <div><span>鍚堣</span><strong>楼{{ cart?.estimatedAmountText ?? '0' }}</strong></div>
+          <div><span>合计</span><strong>¥{{ cart?.estimatedAmountText ?? '0' }}</strong></div>
           <button class="primary" @click="openCartConfirm">鍘荤粨绠</button>
         </footer>
       </section>
@@ -697,48 +697,48 @@ onUnmounted(() => {
             <div class="small-visual" :class="imageTone(item.productId)">{{ item.productName.slice(0, 1) }}</div>
             <div>
               <strong>{{ item.productName }}</strong>
-              <span>{{ item.skuName }} 脳 {{ item.quantity }}</span>
-              <p>楼{{ item.totalAmountText }}</p>
-              <em v-if="item.noticeTitle">{{ item.noticeTitle }}锛歿{ item.noticeContent }}</em>
+              <span>{{ item.skuName }} × {{ item.quantity }}</span>
+              <p>¥{{ item.totalAmountText }}</p>
+              <em v-if="item.noticeTitle">{{ item.noticeTitle }}：{{ item.noticeContent }}</em>
             </div>
           </article>
           <section class="panel detail-list">
-            <div><span>Coupon</span><strong>{{ confirmData.selectedCoupon ? '-楼' + confirmData.selectedCoupon.discountAmountText : 'None' }}</strong></div>
+            <div><span>Coupon</span><strong>{{ confirmData.selectedCoupon ? '-¥' + confirmData.selectedCoupon.discountAmountText : 'None' }}</strong></div>
             <div v-if="confirmData.pointDeduction.visible" @click="toggleUsePoints">
-              <span>Points</span><strong>{{ confirmData.pointDeduction.selected ? '-楼' + confirmData.pointDeduction.deductionAmountText : 'Unused' }}</strong>
+              <span>Points</span><strong>{{ confirmData.pointDeduction.selected ? '-¥' + confirmData.pointDeduction.deductionAmountText : 'Unused' }}</strong>
             </div>
-            <div><span>Freight</span><strong>楼{{ confirmData.freightAmountText }}</strong></div>
+            <div><span>Freight</span><strong>¥{{ confirmData.freightAmountText }}</strong></div>
           </section>
           <section class="panel detail-list">
-            <div><span>Products</span><strong>楼{{ confirmData.amount.productAmountText }}</strong></div>
-            <div><span>Coupon discount</span><strong>-楼{{ confirmData.amount.couponDiscountAmountText }}</strong></div>
-            <div><span>Point discount</span><strong>-楼{{ confirmData.amount.pointDiscountAmountText }}</strong></div>
-            <div><span>Pay amount</span><strong class="orange">楼{{ confirmData.amount.payAmountText }}</strong></div>
+            <div><span>Products</span><strong>¥{{ confirmData.amount.productAmountText }}</strong></div>
+            <div><span>Coupon discount</span><strong>-¥{{ confirmData.amount.couponDiscountAmountText }}</strong></div>
+            <div><span>Point discount</span><strong>-¥{{ confirmData.amount.pointDiscountAmountText }}</strong></div>
+            <div><span>Pay amount</span><strong class="orange">¥{{ confirmData.amount.payAmountText }}</strong></div>
           </section>
-          <button class="primary wide" @click="submitOrder">鎻愪氦璁㈠崟</button>
+          <button class="primary wide" @click="submitOrder">提交订单</button>
         </div>
       </section>
 
       <section v-else-if="route.view === 'payment'" class="view payment-view">
         <section class="pay-amount">
           <span>{{ currentOrder?.orderStatus === 'WAIT_SHIP' ? 'Waiting shipment' : '寰呮敮浠' }}</span>
-          <strong>楼{{ currentOrder?.payAmountText ?? '0' }}</strong>
+          <strong>¥{{ currentOrder?.payAmountText ?? '0' }}</strong>
           <p>{{ currentOrder?.orderNo }}</p>
         </section>
         <section class="panel payment-methods">
-          <label><input type="radio" checked /> 妯℃嫙寰俊鏀粯</label>
+          <label><input type="radio" checked /> 模拟微信支付</label>
           <label><input type="radio" /> 妯℃嫙鏀粯瀹濇敮浠</label>
         </section>
-        <button class="primary wide" :disabled="currentOrder?.orderStatus !== 'WAIT_PAY'" @click="payCurrentOrder">绔嬪嵆鏀粯</button>
+        <button class="primary wide" :disabled="currentOrder?.orderStatus !== 'WAIT_PAY'" @click="payCurrentOrder">立即支付</button>
         <p v-if="paymentMessage" class="success-text">{{ paymentMessage }}</p>
-        <button class="ghost wide" @click="currentOrder && navigate('order-detail', { id: currentOrder.id })">鏌ョ湅璁㈠崟</button>
+        <button class="ghost wide" @click="currentOrder && navigate('order-detail', { id: currentOrder.id })">查看订单</button>
       </section>
 
       <section v-else-if="route.view === 'orders'" class="view">
-        <div v-if="orders.length === 0" class="empty-state">鏆傛棤璁㈠崟</div>
+        <div v-if="orders.length === 0" class="empty-state">暂无订单</div>
         <article v-for="order in orders" :key="order.id" class="order-card" @click="navigate('order-detail', { id: order.id })">
           <div><strong>{{ order.orderNo }}</strong><span>{{ statusText(order.orderStatus) }}</span></div>
-          <p>瀹炰粯 楼{{ order.payAmountText }}</p>
+          <p>实付 ¥{{ order.payAmountText }}</p>
         </article>
       </section>
 
@@ -746,22 +746,22 @@ onUnmounted(() => {
         <section class="panel detail-list">
           <div><span>璁㈠崟鐘舵€</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
           <div><span>After-sale</span><strong>{{ statusText(currentOrder.aftersaleStatus) }}</strong></div>
-          <div><span>璁㈠崟缂栧彿</span><strong>{{ currentOrder.orderNo }}</strong></div>
-          <div><span>鏀惰揣淇℃伅</span><strong>{{ currentOrder.receiverName }} {{ currentOrder.receiverMobile }}</strong></div>
+          <div><span>订单编号</span><strong>{{ currentOrder.orderNo }}</strong></div>
+          <div><span>收货信息</span><strong>{{ currentOrder.receiverName }} {{ currentOrder.receiverMobile }}</strong></div>
           <p>{{ currentOrder.receiverAddress }}</p>
         </section>
         <article v-for="item in currentOrder.items" :key="item.id" class="order-line">
           <div class="small-visual" :class="imageTone(item.productId)">{{ item.productName.slice(0, 1) }}</div>
           <div>
             <strong>{{ item.productName }}</strong>
-            <span>{{ item.skuName }} 脳 {{ item.quantity }}</span>
-            <p>楼{{ item.payAmountText }}</p>
+            <span>{{ item.skuName }} × {{ item.quantity }}</span>
+            <p>¥{{ item.payAmountText }}</p>
           </div>
         </article>
         <section class="panel detail-list">
-          <div><span>瀹炰粯閲戦</span><strong class="orange">楼{{ currentOrder.payAmountText }}</strong></div>
+          <div><span>实付金额</span><strong class="orange">¥{{ currentOrder.payAmountText }}</strong></div>
         </section>
-        <button v-if="currentOrder.orderStatus === 'WAIT_PAY'" class="ghost wide" @click="cancelCurrentOrder(currentOrder.id)">鍙栨秷璁㈠崟</button>
+        <button v-if="currentOrder.orderStatus === 'WAIT_PAY'" class="ghost wide" @click="cancelCurrentOrder(currentOrder.id)">取消订单</button>
         <button v-if="currentOrder.payStatus === 'PAID' && currentOrder.aftersaleStatus === 'NONE'" class="ghost wide" @click="applyRefund(currentOrder)">Apply refund</button>
       </section>
 
@@ -775,14 +775,14 @@ onUnmounted(() => {
           <button class="logout-btn" @click="logout">閫€鍑</button>
         </section>
         <section class="stats">
-          <button @click="navigate('orders')"><strong>璁㈠崟</strong><span>鏌ョ湅鍏ㄩ儴</span></button>
+          <button @click="navigate('orders')"><strong>订单</strong><span>查看全部</span></button>
           <button @click="navigate('cart')"><strong>{{ cartBadge }}</strong><span>璐墿杞</span></button>
-          <button><strong>5000</strong><span>绉垎</span></button>
+          <button><strong>5000</strong><span>积分</span></button>
         </section>
         <section class="panel menu-list">
-          <button @click="navigate('orders')">鎴戠殑璁㈠崟</button>
+          <button @click="navigate('orders')">我的订单</button>
           <button @click="navigate('cart')">璐墿杞</button>
-          <button @click="navigate('search')">鎼滅储鍟嗗搧</button>
+          <button @click="navigate('search')">搜索商品</button>
           <button @click="showPasswordPanel = !showPasswordPanel">Change password</button>
         </section>
         <form v-if="showPasswordPanel" class="panel password-panel" @submit.prevent="changePassword">
@@ -810,11 +810,11 @@ onUnmounted(() => {
     </section>
 
     <nav v-if="route.view !== 'login'" class="tabbar">
-      <button :class="{ active: route.view === 'home' }" @click="navigate('home')">棣栭〉</button>
-      <button :class="{ active: route.view === 'category' }" @click="navigate('category')">鍒嗙被</button>
-      <button :class="{ active: route.view === 'discover' || route.view === 'search' }" @click="navigate('discover')">鍙戠幇</button>
+      <button :class="{ active: route.view === 'home' }" @click="navigate('home')">首页</button>
+      <button :class="{ active: route.view === 'category' }" @click="navigate('category')">分类</button>
+      <button :class="{ active: route.view === 'discover' || route.view === 'search' }" @click="navigate('discover')">发现</button>
       <button :class="{ active: route.view === 'cart' }" @click="navigate('cart')">Cart <span v-if="cartBadge">{{ cartBadge }}</span></button>
-      <button :class="{ active: route.view === 'mine' }" @click="navigate('mine')">鎴戠殑</button>
+      <button :class="{ active: route.view === 'mine' }" @click="navigate('mine')">我的</button>
     </nav>
   </main>
 </template>

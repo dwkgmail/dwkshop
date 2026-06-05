@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { changeAdminPassword, loginAdmin, logoutAdmin } from './api/auth';
 import { AUTH_EXPIRED_EVENT, clearAuthToken, getAuthToken, setAuthTokens } from './api/client';
@@ -65,12 +65,12 @@ const productForm = reactive<ProductPayload>({
   pointRewardEnabled: false,
   pointReward: 0,
   virtualSales: 0,
-  noticeTitle: '鐢ㄦ埛璐拱椤荤煡',
+  noticeTitle: '用户购买须知',
   noticeContent: '',
   skus: [
     {
-      skuName: '榛樿瑙勬牸',
-      specJson: '{"瑙勬牸":"榛樿"}',
+      skuName: '默认规格',
+      specJson: '{"规格":"默认"}',
       salePrice: 9900,
       linePrice: 12900,
       stock: 100,
@@ -80,14 +80,14 @@ const productForm = reactive<ProductPayload>({
 });
 
 const menu = [
-  { key: 'dashboard', label: '棣栭〉' },
-  { key: 'products', label: '鍟嗗搧绠＄悊' },
-  { key: 'orders', label: '璁㈠崟绠＄悊' },
-  { key: 'users', label: '鐢ㄦ埛绠＄悊' },
-  { key: 'marketing', label: '钀ラ攢绠＄悊' },
-  { key: 'aftersale', label: '鍞悗绠＄悊' },
-  { key: 'finance', label: '璐㈠姟绠＄悊' },
-  { key: 'permission', label: '鏉冮檺绠＄悊' }
+  { key: 'dashboard', label: '首页' },
+  { key: 'products', label: '商品管理' },
+  { key: 'orders', label: '订单管理' },
+  { key: 'users', label: '用户管理' },
+  { key: 'marketing', label: '营销管理' },
+  { key: 'aftersale', label: '售后管理' },
+  { key: 'finance', label: '财务管理' },
+  { key: 'permission', label: '权限管理' }
 ];
 
 const filteredProducts = computed(() => {
@@ -141,7 +141,7 @@ async function runTask(task: () => Promise<void>) {
   try {
     await task();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '鎿嶄綔澶辫触锛岃绋嶅悗閲嶈瘯';
+    error.value = err instanceof Error ? err.message : '操作失败，请稍后重试';
   } finally {
     loading.value = false;
   }
@@ -152,7 +152,7 @@ async function login() {
     const result = await loginAdmin(loginForm.username, loginForm.password);
     setAuthTokens(result.token, result.refreshToken);
     loggedIn.value = true;
-    showToast(`娆㈣繋鍥炴潵锛?{result.name}`);
+    showToast(`欢迎回来，${result.name}`);
     await loadDashboard();
   });
 }
@@ -220,7 +220,7 @@ function nav(key: string) {
     page.value = 'aftersales';
     loadAftersales();
   } else {
-    placeholderTitle.value = menu.find((item) => item.key === key)?.label ?? '妯″潡';
+    placeholderTitle.value = menu.find((item) => item.key === key)?.label ?? '模块';
     page.value = 'placeholder';
   }
 }
@@ -290,12 +290,12 @@ function resetProductForm() {
     pointRewardEnabled: false,
     pointReward: 0,
     virtualSales: 0,
-    noticeTitle: '鐢ㄦ埛璐拱椤荤煡',
+    noticeTitle: '用户购买须知',
     noticeContent: '',
     skus: [
       {
-        skuName: '榛樿瑙勬牸',
-        specJson: '{"瑙勬牸":"榛樿"}',
+        skuName: '默认规格',
+        specJson: '{"规格":"默认"}',
         salePrice: 9900,
         linePrice: 12900,
         stock: 100,
@@ -336,7 +336,7 @@ function fillProductForm(detail: ProductDetail) {
     pointRewardEnabled: detail.pointRewardEnabled,
     pointReward: detail.pointReward,
     virtualSales: detail.virtualSales ?? 0,
-    noticeTitle: detail.noticeTitle ?? '鐢ㄦ埛璐拱椤荤煡',
+    noticeTitle: detail.noticeTitle ?? '用户购买须知',
     noticeContent: detail.noticeContent ?? '',
     skus: detail.skus.map((sku) => ({
       skuCode: sku.skuCode,
@@ -353,8 +353,8 @@ function fillProductForm(detail: ProductDetail) {
 
 function addSku() {
   productForm.skus.push({
-    skuName: `瑙勬牸${productForm.skus.length + 1}`,
-    specJson: '{"瑙勬牸":"鏂板"}',
+    skuName: `规格${productForm.skus.length + 1}`,
+    specJson: '{"规格":"新增"}',
     salePrice: 9900,
     linePrice: 12900,
     stock: 100,
@@ -476,19 +476,19 @@ onUnmounted(() => {
     <section class="login-card">
       <div class="login-brand">
         <span>DWK Shop</span>
-        <h1>鐢靛晢绠＄悊鍚庡彴</h1>
-        <p>鍟嗗搧銆佽鍗曚笌杩愯惀鏁版嵁绠＄悊</p>
+        <h1>电商管理后台</h1>
+        <p>商品、订单与运营数据管理</p>
       </div>
       <form @submit.prevent="login">
         <label>
-          璐﹀彿
+          账号
           <input v-model="loginForm.username" />
         </label>
         <label>
-          瀵嗙爜
+          密码
           <input v-model="loginForm.password" type="password" />
         </label>
-        <button class="primary wide" type="submit">鐧诲綍</button>
+        <button class="primary wide" type="submit">登录</button>
       </form>
     </section>
   </main>
@@ -496,7 +496,7 @@ onUnmounted(() => {
   <main v-else class="admin-layout">
     <div v-if="toast" class="toast">{{ toast }}</div>
     <aside class="sidebar">
-      <div class="brand">DWK Shop 鍚庡彴</div>
+      <div class="brand">DWK Shop 后台</div>
       <nav>
         <button v-for="item in menu" :key="item.key" :class="{ active: page === item.key || (item.key === 'products' && page.startsWith('product')) || (item.key === 'orders' && page.startsWith('order')) || (item.key === 'aftersale' && page === 'aftersales') }" @click="nav(item.key)">
           {{ item.label }}
@@ -509,16 +509,16 @@ onUnmounted(() => {
         <div>
           <h1>
             {{
-              page === 'dashboard' ? '鍚庡彴棣栭〉' :
-              page === 'products' ? '鍟嗗搧鍒楄〃' :
-              page === 'product-create' ? '鏂板鍟嗗搧' :
-              page === 'product-edit' ? '缂栬緫鍟嗗搧' :
-              page === 'orders' ? '璁㈠崟鍒楄〃' :
+              page === 'dashboard' ? '后台首页' :
+              page === 'products' ? '商品列表' :
+              page === 'product-create' ? '新增商品' :
+              page === 'product-edit' ? '编辑商品' :
+              page === 'orders' ? '订单列表' :
               page === 'aftersales' ? 'After-sale' :
-              page === 'order-detail' ? '璁㈠崟璇︽儏' : placeholderTitle
+              page === 'order-detail' ? '订单详情' : placeholderTitle
             }}
           </h1>
-          <span>楂樻晥绠＄悊鍟嗗搧銆佽鍗曚笌杩愯惀鏁版嵁</span>
+          <span>高效管理商品、订单与运营数据</span>
         </div>
         <div class="topbar-actions">
           <button class="ghost" @click="showPasswordPanel = !showPasswordPanel">Change password</button>
@@ -535,8 +535,8 @@ onUnmounted(() => {
 
       <section v-if="page === 'dashboard'" class="page">
         <section class="metrics">
-          <article><span>璁㈠崟鎬绘暟</span><strong>{{ dashboard.orderCount }}</strong></article>
-          <article><span>鏀粯閲戦</span><strong>楼{{ dashboard.payAmountText }}</strong></article>
+          <article><span>订单总数</span><strong>{{ dashboard.orderCount }}</strong></article>
+          <article><span>支付金额</span><strong>¥{{ dashboard.payAmountText }}</strong></article>
           <article><span>Waiting shipment</span><strong>{{ dashboard.waitShip }}</strong></article>
           <article><span>Refund applying</span><strong>{{ dashboard.refundApplying }}</strong></article>
         </section>
@@ -548,12 +548,12 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="panel">
-            <h2>蹇嵎鍏ュ彛</h2>
+            <h2>快捷入口</h2>
             <div class="quick-actions">
-              <button @click="openCreate">鏂板鍟嗗搧</button>
-              <button @click="nav('orders')">鏌ョ湅璁㈠崟</button>
+              <button @click="openCreate">新增商品</button>
+              <button @click="nav('orders')">查看订单</button>
               <button @click="nav('aftersale')">After-sale</button>
-              <button @click="nav('products')">鍟嗗搧绠＄悊</button>
+              <button @click="nav('products')">商品管理</button>
             </div>
           </div>
         </section>
@@ -561,29 +561,29 @@ onUnmounted(() => {
 
       <section v-else-if="page === 'products'" class="page">
         <section class="panel filters">
-          <input v-model="productFilters.name" placeholder="鍟嗗搧鍚嶇О" />
+          <input v-model="productFilters.name" placeholder="商品名称" />
           <select v-model="productFilters.categoryId">
-            <option value="">鍏ㄩ儴鍒嗙被</option>
+            <option value="">全部分类</option>
             <option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }}</option>
           </select>
           <select v-model="productFilters.saleStatus">
             <option value="">鍏ㄩ儴鐘舵€</option>
-            <option value="ON_SALE">涓婃灦</option>
-            <option value="OFF_SALE">涓嬫灦</option>
+            <option value="ON_SALE">上架</option>
+            <option value="OFF_SALE">下架</option>
           </select>
-          <button class="primary" @click="openCreate">鏂板鍟嗗搧</button>
+          <button class="primary" @click="openCreate">新增商品</button>
         </section>
         <section class="panel table-panel">
           <table>
             <thead>
               <tr>
-                <th>鍟嗗搧</th>
-                <th>鍒嗙被</th>
-                <th>浠锋牸</th>
-                <th>搴撳瓨</th>
+                <th>商品</th>
+                <th>分类</th>
+                <th>价格</th>
+                <th>库存</th>
                 <th>閿€閲</th>
                 <th>鐘舵€</th>
-                <th>鎿嶄綔</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -595,65 +595,65 @@ onUnmounted(() => {
                   </div>
                 </td>
                 <td>{{ categories.find((item) => item.id === product.categoryId)?.name ?? '-' }}</td>
-                <td>楼{{ product.minSalePriceText }}</td>
+                <td>¥{{ product.minSalePriceText }}</td>
                 <td>{{ product.stock }}</td>
                 <td>{{ product.actualSales + product.virtualSales }}</td>
                 <td><em :class="['status', product.saleStatus]">{{ statusText(product.saleStatus) }}</em></td>
                 <td class="actions">
-                  <button @click="openEdit(product.id)">缂栬緫</button>
-                  <button v-if="product.saleStatus !== 'ON_SALE'" @click="changeSaleStatus(product.id, 'ON_SALE')">涓婃灦</button>
-                  <button v-else @click="changeSaleStatus(product.id, 'OFF_SALE')">涓嬫灦</button>
+                  <button @click="openEdit(product.id)">编辑</button>
+                  <button v-if="product.saleStatus !== 'ON_SALE'" @click="changeSaleStatus(product.id, 'ON_SALE')">上架</button>
+                  <button v-else @click="changeSaleStatus(product.id, 'OFF_SALE')">下架</button>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div v-if="filteredProducts.length === 0" class="empty">鏆傛棤鍟嗗搧</div>
+          <div v-if="filteredProducts.length === 0" class="empty">暂无商品</div>
         </section>
       </section>
 
       <section v-else-if="page === 'product-create' || page === 'product-edit'" class="page form-page">
         <section class="panel form-grid">
-          <label>鍟嗗搧鍚嶇О<input v-model="productForm.name" /></label>
-          <label>鍒嗙被<select v-model.number="productForm.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }}</option></select></label>
-          <label>涓诲浘<input v-model="productForm.mainImageUrl" /></label>
+          <label>商品名称<input v-model="productForm.name" /></label>
+          <label>分类<select v-model.number="productForm.categoryId"><option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }}</option></select></label>
+          <label>主图<input v-model="productForm.mainImageUrl" /></label>
           <label>Sale status<select v-model="productForm.saleStatus"><option value="OFF_SALE">Off sale</option><option value="ON_SALE">On sale</option></select></label>
           <label>Subtitle<input v-model="productForm.subtitle" /></label>
           <label>Delivery<select v-model="productForm.deliveryType"><option value="NORMAL">Normal</option><option value="COLD_CHAIN">Cold chain</option></select></label>
         </section>
         <section class="panel toggles">
-          <label><input v-model="productForm.allowCart" type="checkbox" /> 鍏佽鍔犺喘</label>
-          <label><input v-model="productForm.allowSingleBuy" type="checkbox" /> 鍏佽鍗曠嫭璐拱</label>
-          <label><input v-model="productForm.pointDeductEnabled" type="checkbox" /> 鏀寔绉垎鎶垫墸</label>
+          <label><input v-model="productForm.allowCart" type="checkbox" /> 允许加购</label>
+          <label><input v-model="productForm.allowSingleBuy" type="checkbox" /> 允许单独购买</label>
+          <label><input v-model="productForm.pointDeductEnabled" type="checkbox" /> 支持积分抵扣</label>
           <label><input v-model="productForm.pointRewardEnabled" type="checkbox" /> 杩旂Н鍒</label>
           <label>Reward points<input v-model.number="productForm.pointReward" type="number" min="0" /></label>
         </section>
         <section class="panel">
           <div class="section-heading">
             <h2>SKU</h2>
-            <button class="ghost" @click="addSku">鏂板 SKU</button>
+            <button class="ghost" @click="addSku">新增 SKU</button>
           </div>
           <div v-for="(sku, index) in productForm.skus" :key="index" class="sku-editor">
-            <label>SKU 鍚嶇О<input v-model="sku.skuName" /></label>
-            <label>瑙勬牸 JSON<input v-model="sku.specJson" /></label>
+            <label>SKU 名称<input v-model="sku.skuName" /></label>
+            <label>规格 JSON<input v-model="sku.specJson" /></label>
             <label>Price cents<input v-model.number="sku.salePrice" type="number" min="0" /></label>
-            <label>搴撳瓨<input v-model.number="sku.stock" type="number" min="0" /></label>
+            <label>库存<input v-model.number="sku.stock" type="number" min="0" /></label>
             <label>Status<select v-model="sku.skuStatus"><option value="ENABLED">Enabled</option><option value="DISABLED">Disabled</option></select></label>
-            <button class="danger" @click="removeSku(index)">鍒犻櫎</button>
+            <button class="danger" @click="removeSku(index)">删除</button>
           </div>
         </section>
         <section class="panel form-grid">
-          <label>璐拱椤荤煡鏍囬<input v-model="productForm.noticeTitle" /></label>
-          <label class="full">璐拱椤荤煡鍐呭<textarea v-model="productForm.noticeContent"></textarea></label>
+          <label>购买须知标题<input v-model="productForm.noticeTitle" /></label>
+          <label class="full">购买须知内容<textarea v-model="productForm.noticeContent"></textarea></label>
         </section>
         <div class="form-actions">
-          <button class="ghost" @click="page = 'products'">鍙栨秷</button>
-          <button class="primary" @click="saveProduct">淇濆瓨</button>
+          <button class="ghost" @click="page = 'products'">取消</button>
+          <button class="primary" @click="saveProduct">保存</button>
         </div>
       </section>
 
       <section v-else-if="page === 'orders'" class="page">
         <section class="panel filters">
-          <input v-model="orderFilters.orderNo" placeholder="璁㈠崟缂栧彿" />
+          <input v-model="orderFilters.orderNo" placeholder="订单编号" />
           <input v-model="orderFilters.mobile" placeholder="Mobile" />
           <select v-model="orderFilters.orderStatus">
             <option value="">鍏ㄩ儴鐘舵€</option>
@@ -661,19 +661,19 @@ onUnmounted(() => {
             <option value="CANCELED">宸插彇娑</option>
             <option value="WAIT_SHIP">寰呭彂璐</option>
           </select>
-          <button class="primary" @click="loadOrders">鏌ヨ</button>
+          <button class="primary" @click="loadOrders">查询</button>
         </section>
         <section class="panel table-panel">
           <table>
             <thead>
               <tr>
-                <th>璁㈠崟缂栧彿</th>
+                <th>订单编号</th>
                 <th>鎵嬫満鍙</th>
-                <th>涓嬪崟鏃堕棿</th>
-                <th>閲戦</th>
+                <th>下单时间</th>
+                <th>金额</th>
                 <th>璁㈠崟鐘舵€</th>
                 <th>鏀粯鐘舵€</th>
-                <th>鎿嶄綔</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -681,14 +681,14 @@ onUnmounted(() => {
                 <td>{{ order.orderNo }}</td>
                 <td>{{ orderDetailsById[order.id]?.receiverMobile ?? '-' }}</td>
                 <td>{{ order.createdAt?.replace('T', ' ').slice(0, 19) }}</td>
-                <td>楼{{ order.payAmountText }}</td>
+                <td>¥{{ order.payAmountText }}</td>
                 <td><em class="status">{{ statusText(order.orderStatus) }}</em></td>
                 <td>{{ statusText(order.payStatus) }}</td>
-                <td class="actions"><button @click="openOrderDetail(order.id)">璇︽儏</button></td>
+                <td class="actions"><button @click="openOrderDetail(order.id)">详情</button></td>
               </tr>
             </tbody>
           </table>
-          <div v-if="filteredOrders.length === 0" class="empty">鏆傛棤璁㈠崟</div>
+          <div v-if="filteredOrders.length === 0" class="empty">暂无订单</div>
         </section>
       </section>
 
@@ -712,7 +712,7 @@ onUnmounted(() => {
                 <td>{{ item.aftersaleNo }}</td>
                 <td>{{ item.orderNo }}</td>
                 <td>{{ item.receiverMobile }}</td>
-                <td>楼{{ item.refundAmountText }}</td>
+                <td>¥{{ item.refundAmountText }}</td>
                 <td>{{ item.reason }}</td>
                 <td><em class="status">{{ statusText(item.aftersaleStatus) }}</em></td>
                 <td>{{ item.applyTime?.replace('T', ' ').slice(0, 19) }}</td>
@@ -730,59 +730,59 @@ onUnmounted(() => {
 
       <section v-else-if="page === 'order-detail' && currentOrder" class="page detail-grid">
         <section class="panel info-list">
-          <h2>璁㈠崟淇℃伅</h2>
-          <div><span>璁㈠崟缂栧彿</span><strong>{{ currentOrder.orderNo }}</strong></div>
+          <h2>订单信息</h2>
+          <div><span>订单编号</span><strong>{{ currentOrder.orderNo }}</strong></div>
           <div><span>璁㈠崟鐘舵€</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
           <div><span>After-sale</span><strong>{{ statusText(currentOrder.aftersaleStatus) }}</strong></div>
-          <div><span>涓嬪崟鏃堕棿</span><strong>{{ currentOrder.createdAt?.replace('T', ' ').slice(0, 19) }}</strong></div>
-          <div><span>澶囨敞</span><strong>{{ currentOrder.remark || '-' }}</strong></div>
+          <div><span>下单时间</span><strong>{{ currentOrder.createdAt?.replace('T', ' ').slice(0, 19) }}</strong></div>
+          <div><span>备注</span><strong>{{ currentOrder.remark || '-' }}</strong></div>
         </section>
         <section class="panel info-list">
-          <h2>鏀惰揣淇℃伅</h2>
+          <h2>收货信息</h2>
           <div><span>鏀惰揣浜</span><strong>{{ currentOrder.receiverName }}</strong></div>
           <div><span>鎵嬫満鍙</span><strong>{{ currentOrder.receiverMobile }}</strong></div>
-          <div><span>鍦板潃</span><strong>{{ currentOrder.receiverAddress }}</strong></div>
+          <div><span>地址</span><strong>{{ currentOrder.receiverAddress }}</strong></div>
         </section>
         <section class="panel table-panel full-row">
-          <h2>鍟嗗搧淇℃伅</h2>
+          <h2>商品信息</h2>
           <table>
-            <thead><tr><th>鍟嗗搧</th><th>SKU</th><th>鍗曚环</th><th>鏁伴噺</th><th>灏忚</th></tr></thead>
+            <thead><tr><th>商品</th><th>SKU</th><th>单价</th><th>数量</th><th>小计</th></tr></thead>
             <tbody>
               <tr v-for="item in currentOrder.items" :key="item.id">
                 <td>{{ item.productName }}</td>
                 <td>{{ item.skuName }}</td>
-                <td>楼{{ item.salePriceText }}</td>
+                <td>¥{{ item.salePriceText }}</td>
                 <td>{{ item.quantity }}</td>
-                <td>楼{{ item.payAmountText }}</td>
+                <td>¥{{ item.payAmountText }}</td>
               </tr>
             </tbody>
           </table>
         </section>
         <section class="panel info-list">
-          <h2>閲戦鏄庣粏</h2>
-          <div><span>鍟嗗搧閲戦</span><strong>楼{{ currentOrder.amount.productAmountText }}</strong></div>
-          <div><span>浼樻儬鍒</span><strong>-楼{{ currentOrder.amount.couponDiscountAmountText }}</strong></div>
-          <div><span>绉垎鎶垫墸</span><strong>-楼{{ currentOrder.amount.pointDiscountAmountText }}</strong></div>
-          <div><span>杩愯垂</span><strong>楼{{ currentOrder.amount.freightAmountText }}</strong></div>
-          <div><span>瀹炰粯</span><strong class="orange">楼{{ currentOrder.amount.payAmountText }}</strong></div>
+          <h2>金额明细</h2>
+          <div><span>商品金额</span><strong>¥{{ currentOrder.amount.productAmountText }}</strong></div>
+          <div><span>浼樻儬鍒</span><strong>-¥{{ currentOrder.amount.couponDiscountAmountText }}</strong></div>
+          <div><span>积分抵扣</span><strong>-¥{{ currentOrder.amount.pointDiscountAmountText }}</strong></div>
+          <div><span>运费</span><strong>¥{{ currentOrder.amount.freightAmountText }}</strong></div>
+          <div><span>实付</span><strong class="orange">¥{{ currentOrder.amount.payAmountText }}</strong></div>
         </section>
         <section class="panel info-list">
-          <h2>鏀粯淇℃伅</h2>
+          <h2>支付信息</h2>
           <div><span>鏀粯鐘舵€</span><strong>{{ statusText(currentOrder.payStatus) }}</strong></div>
-          <div><span>搴斾粯閲戦</span><strong>楼{{ currentOrder.payAmountText }}</strong></div>
-          <div><span>鏀粯鎴</span><strong>{{ currentOrder.payExpireTime?.replace('T', ' ').slice(0, 19) }}</strong></div>
+          <div><span>应付金额</span><strong>¥{{ currentOrder.payAmountText }}</strong></div>
+          <div><span>支付截止</span><strong>{{ currentOrder.payExpireTime?.replace('T', ' ').slice(0, 19) }}</strong></div>
         </section>
       </section>
 
       <section v-else class="page">
         <section class="panel placeholder">
           <h2>{{ placeholderTitle }}</h2>
-          <p>璇ユā鍧楀凡鍦ㄨ彍鍗曚腑棰勭暀锛屽悗缁寜 MVP 鑺傚鎺ュ叆銆</p>
+          <p>该模块已在菜单中预留，后续按 MVP 鑺傚鎺ュ叆銆</p>
         </section>
       </section>
 
       <div v-if="loading" class="loading">鍔犺浇涓?..</div>
-      <div v-if="error" class="error-box"><span>{{ error }}</span><button @click="error = ''">鍏抽棴</button></div>
+      <div v-if="error" class="error-box"><span>{{ error }}</span><button @click="error = ''">关闭</button></div>
     </section>
   </main>
 </template>

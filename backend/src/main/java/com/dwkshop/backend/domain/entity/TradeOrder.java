@@ -72,9 +72,20 @@ public class TradeOrder {
 
     private String remark;
 
+    @Column(length = 64)
+    private String logisticsCompany;
+
+    @Column(length = 64)
+    private String logisticsNo;
+
+    @Column(length = 255)
+    private String deliveryRemark;
+
     private LocalDateTime payExpireTime;
 
     private LocalDateTime payTime;
+
+    private LocalDateTime deliveryTime;
 
     private LocalDateTime cancelTime;
 

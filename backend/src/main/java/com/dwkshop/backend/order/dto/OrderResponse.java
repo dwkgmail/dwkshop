@@ -17,7 +17,13 @@ public record OrderResponse(
     String receiverMobile,
     String receiverAddress,
     String remark,
+    String logisticsCompany,
+    String logisticsNo,
+    String deliveryRemark,
     LocalDateTime payExpireTime,
+    LocalDateTime payTime,
+    LocalDateTime deliveryTime,
+    LocalDateTime finishTime,
     LocalDateTime createdAt,
     OrderAmountResponse amount,
     List<OrderItemResponse> items

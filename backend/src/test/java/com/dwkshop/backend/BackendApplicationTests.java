@@ -504,6 +504,71 @@ class BackendApplicationTests {
         assertThat(cartCount).isEqualTo(1);
     }
 
+    @Test
+    void adminOrdersRequireLogin() throws Exception {
+        mockMvc.perform(get("/admin/orders"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void adminCanShipOrderAndUpdateDeliveryStatus() throws Exception {
+        clearCart();
+        MvcResult confirm = mockMvc.perform(post("/api/orders/confirm").contentType("application/json").content("""
+            {"sourceType":"BUY_NOW","skuId":1,"quantity":1}
+            """))
+            .andExpect(status().isOk())
+            .andReturn();
+        String token = com.jayway.jsonpath.JsonPath.read(confirm.getResponse().getContentAsString(), "$.settlementToken");
+        Integer payAmount = com.jayway.jsonpath.JsonPath.read(confirm.getResponse().getContentAsString(), "$.amount.payAmount");
+
+        MvcResult created = mockMvc.perform(post("/api/orders/create").contentType("application/json").content("""
+            {"settlementToken":"%s","expectedPayAmount":%d}
+            """.formatted(token, payAmount)))
+            .andExpect(status().isOk())
+            .andReturn();
+        Integer orderId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/api/orders/{id}/pay", orderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"));
+
+        mockMvc.perform(post("/admin/orders/{id}/ship", orderId)
+                .header("Authorization", "Bearer " + adminToken())
+                .contentType("application/json")
+                .content("""
+                    {"logisticsCompany":"SF Express","logisticsNo":"SF1234567890","deliveryRemark":"Leave at front desk"}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_RECEIVE"))
+            .andExpect(jsonPath("$.deliveryStatus").value("SHIPPED"))
+            .andExpect(jsonPath("$.logisticsCompany").value("SF Express"))
+            .andExpect(jsonPath("$.logisticsNo").value("SF1234567890"))
+            .andExpect(jsonPath("$.deliveryTime").isNotEmpty());
+
+        mockMvc.perform(post("/admin/orders/{id}/delivery-status", orderId)
+                .header("Authorization", "Bearer " + adminToken())
+                .contentType("application/json")
+                .content("""
+                    {"deliveryStatus":"IN_TRANSIT","deliveryRemark":"Package arrived at transfer center"}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_RECEIVE"))
+            .andExpect(jsonPath("$.deliveryStatus").value("IN_TRANSIT"))
+            .andExpect(jsonPath("$.deliveryRemark").value("Package arrived at transfer center"));
+
+        mockMvc.perform(post("/admin/orders/{id}/delivery-status", orderId)
+                .header("Authorization", "Bearer " + adminToken())
+                .contentType("application/json")
+                .content("""
+                    {"deliveryStatus":"DELIVERED","deliveryRemark":"Customer signed"}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("FINISHED"))
+            .andExpect(jsonPath("$.deliveryStatus").value("DELIVERED"))
+            .andExpect(jsonPath("$.finishTime").isNotEmpty());
+    }
+
+
     private String adminToken() throws Exception {
         String payload = """
             {

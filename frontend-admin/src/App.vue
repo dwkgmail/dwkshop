@@ -17,7 +17,7 @@ import {
   type ProductPayload,
   type ProductSku
 } from './api/products';
-import { getOrder, getOrders, type OrderDetail, type OrderSummary } from './api/orders';
+import { getOrder, getOrders, shipOrder, updateDeliveryStatus, type OrderDetail, type OrderSummary } from './api/orders';
 
 type Page =
   | 'dashboard'
@@ -49,6 +49,8 @@ const editingId = ref<number | null>(null);
 
 const productFilters = reactive({ name: '', categoryId: '', saleStatus: '' });
 const orderFilters = reactive({ orderNo: '', mobile: '', orderStatus: '' });
+const shippingForm = reactive({ logisticsCompany: '', logisticsNo: '', deliveryRemark: '' });
+const deliveryStatusForm = reactive({ deliveryStatus: 'IN_TRANSIT', deliveryRemark: '' });
 
 const productForm = reactive<ProductPayload>({
   categoryId: 1,
@@ -123,6 +125,14 @@ const dashboard = computed(() => {
     lowStock
   };
 });
+
+const canShipCurrentOrder = computed(() =>
+  currentOrder.value?.orderStatus === 'WAIT_SHIP' && currentOrder.value?.payStatus === 'PAID'
+);
+
+const canUpdateDeliveryCurrentOrder = computed(() =>
+  !!currentOrder.value && currentOrder.value.deliveryStatus !== 'UNSHIPPED' && !!currentOrder.value.deliveryTime
+);
 
 function formatCents(cents: number) {
   return (cents / 100).toFixed(2).replace(/\.?0+$/, '');
@@ -421,6 +431,52 @@ async function openOrderDetail(id: number) {
   page.value = 'order-detail';
   await runTask(async () => {
     currentOrder.value = await getOrder(id);
+    fillDeliveryForms(currentOrder.value);
+  });
+}
+
+function fillDeliveryForms(order: OrderDetail) {
+  Object.assign(shippingForm, {
+    logisticsCompany: order.logisticsCompany ?? '',
+    logisticsNo: order.logisticsNo ?? '',
+    deliveryRemark: order.deliveryRemark ?? ''
+  });
+  Object.assign(deliveryStatusForm, {
+    deliveryStatus: order.deliveryStatus === 'DELIVERED' ? 'DELIVERED' : order.deliveryStatus === 'SHIPPED' ? 'SHIPPED' : 'IN_TRANSIT',
+    deliveryRemark: order.deliveryRemark ?? ''
+  });
+}
+
+async function submitShipment() {
+  const order = currentOrder.value;
+  if (!order) return;
+  if (!shippingForm.logisticsCompany.trim() || !shippingForm.logisticsNo.trim()) {
+    showToast('Please enter logistics company and tracking number');
+    return;
+  }
+  await runTask(async () => {
+    currentOrder.value = await shipOrder(order.id, {
+      logisticsCompany: shippingForm.logisticsCompany.trim(),
+      logisticsNo: shippingForm.logisticsNo.trim(),
+      deliveryRemark: shippingForm.deliveryRemark.trim() || undefined
+    });
+    fillDeliveryForms(currentOrder.value);
+    await loadOrdersQuietly();
+    showToast('Shipment created');
+  });
+}
+
+async function submitDeliveryStatus() {
+  const order = currentOrder.value;
+  if (!order) return;
+  await runTask(async () => {
+    currentOrder.value = await updateDeliveryStatus(order.id, {
+      deliveryStatus: deliveryStatusForm.deliveryStatus,
+      deliveryRemark: deliveryStatusForm.deliveryRemark.trim() || undefined
+    });
+    fillDeliveryForms(currentOrder.value);
+    await loadOrdersQuietly();
+    showToast('Delivery status updated');
   });
 }
 
@@ -453,6 +509,9 @@ function statusText(status: string) {
     UNPAID: 'Unpaid',
     PAID: 'Paid',
     UNSHIPPED: 'Unshipped',
+    SHIPPED: 'Shipped',
+    IN_TRANSIT: 'In transit',
+    DELIVERED: 'Delivered',
     NONE: 'None',
     APPLYING: 'Refund applying',
     REJECTED: 'Refund rejected',
@@ -730,47 +789,83 @@ onUnmounted(() => {
 
       <section v-else-if="page === 'order-detail' && currentOrder" class="page detail-grid">
         <section class="panel info-list">
-          <h2>订单信息</h2>
-          <div><span>订单编号</span><strong>{{ currentOrder.orderNo }}</strong></div>
-          <div><span>璁㈠崟鐘舵€</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
+          <h2>??????</h2>
+          <div><span>??????</span><strong>{{ currentOrder.orderNo }}</strong></div>
+          <div><span>?????????</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
           <div><span>After-sale</span><strong>{{ statusText(currentOrder.aftersaleStatus) }}</strong></div>
-          <div><span>下单时间</span><strong>{{ currentOrder.createdAt?.replace('T', ' ').slice(0, 19) }}</strong></div>
-          <div><span>备注</span><strong>{{ currentOrder.remark || '-' }}</strong></div>
+          <div><span>??????</span><strong>{{ currentOrder.createdAt?.replace('T', ' ').slice(0, 19) }}</strong></div>
+          <div><span>???</span><strong>{{ currentOrder.remark || '-' }}</strong></div>
         </section>
         <section class="panel info-list">
-          <h2>收货信息</h2>
-          <div><span>鏀惰揣浜</span><strong>{{ currentOrder.receiverName }}</strong></div>
-          <div><span>鎵嬫満鍙</span><strong>{{ currentOrder.receiverMobile }}</strong></div>
-          <div><span>地址</span><strong>{{ currentOrder.receiverAddress }}</strong></div>
+          <h2>??????</h2>
+          <div><span>Receiver</span><strong>{{ currentOrder.receiverName }}</strong></div>
+          <div><span>Mobile</span><strong>{{ currentOrder.receiverMobile }}</strong></div>
+          <div><span>???</span><strong>{{ currentOrder.receiverAddress }}</strong></div>
         </section>
         <section class="panel table-panel full-row">
-          <h2>商品信息</h2>
+          <h2>??????</h2>
           <table>
-            <thead><tr><th>商品</th><th>SKU</th><th>单价</th><th>数量</th><th>小计</th></tr></thead>
+            <thead><tr><th>???</th><th>SKU</th><th>???</th><th>???</th><th>???</th></tr></thead>
             <tbody>
               <tr v-for="item in currentOrder.items" :key="item.id">
                 <td>{{ item.productName }}</td>
                 <td>{{ item.skuName }}</td>
-                <td>¥{{ item.salePriceText }}</td>
+                <td>?{{ item.salePriceText }}</td>
                 <td>{{ item.quantity }}</td>
-                <td>¥{{ item.payAmountText }}</td>
+                <td>?{{ item.payAmountText }}</td>
               </tr>
             </tbody>
           </table>
         </section>
         <section class="panel info-list">
-          <h2>金额明细</h2>
-          <div><span>商品金额</span><strong>¥{{ currentOrder.amount.productAmountText }}</strong></div>
-          <div><span>浼樻儬鍒</span><strong>-¥{{ currentOrder.amount.couponDiscountAmountText }}</strong></div>
-          <div><span>积分抵扣</span><strong>-¥{{ currentOrder.amount.pointDiscountAmountText }}</strong></div>
-          <div><span>运费</span><strong>¥{{ currentOrder.amount.freightAmountText }}</strong></div>
-          <div><span>实付</span><strong class="orange">¥{{ currentOrder.amount.payAmountText }}</strong></div>
+          <h2>??????</h2>
+          <div><span>??????</span><strong>?{{ currentOrder.amount.productAmountText }}</strong></div>
+          <div><span>??????</span><strong>-?{{ currentOrder.amount.couponDiscountAmountText }}</strong></div>
+          <div><span>??????</span><strong>-?{{ currentOrder.amount.pointDiscountAmountText }}</strong></div>
+          <div><span>???</span><strong>?{{ currentOrder.amount.freightAmountText }}</strong></div>
+          <div><span>???</span><strong class="orange">?{{ currentOrder.amount.payAmountText }}</strong></div>
         </section>
         <section class="panel info-list">
-          <h2>支付信息</h2>
-          <div><span>鏀粯鐘舵€</span><strong>{{ statusText(currentOrder.payStatus) }}</strong></div>
-          <div><span>应付金额</span><strong>¥{{ currentOrder.payAmountText }}</strong></div>
-          <div><span>支付截止</span><strong>{{ currentOrder.payExpireTime?.replace('T', ' ').slice(0, 19) }}</strong></div>
+          <h2>??????</h2>
+          <div><span>Pay status</span><strong>{{ statusText(currentOrder.payStatus) }}</strong></div>
+          <div><span>??????</span><strong>?{{ currentOrder.payAmountText }}</strong></div>
+          <div><span>??????</span><strong>{{ currentOrder.payExpireTime?.replace('T', ' ').slice(0, 19) }}</strong></div>
+        </section>
+        <section class="panel info-list">
+          <h2>Delivery</h2>
+          <div><span>Status</span><strong>{{ statusText(currentOrder.deliveryStatus) }}</strong></div>
+          <div><span>Logistics</span><strong>{{ currentOrder.logisticsCompany || '-' }}</strong></div>
+          <div><span>Tracking No.</span><strong>{{ currentOrder.logisticsNo || '-' }}</strong></div>
+          <div><span>Shipped at</span><strong>{{ currentOrder.deliveryTime?.replace('T', ' ').slice(0, 19) || '-' }}</strong></div>
+          <div><span>Remark</span><strong>{{ currentOrder.deliveryRemark || '-' }}</strong></div>
+        </section>
+        <section class="panel full-row">
+          <h2>????</h2>
+          <div class="form-grid">
+            <label>????<input v-model="shippingForm.logisticsCompany" :disabled="!canShipCurrentOrder" /></label>
+            <label>????<input v-model="shippingForm.logisticsNo" :disabled="!canShipCurrentOrder" /></label>
+            <label class="full">????<textarea v-model="shippingForm.deliveryRemark" :disabled="!canShipCurrentOrder"></textarea></label>
+          </div>
+          <div class="form-actions">
+            <button class="primary" :disabled="!canShipCurrentOrder" @click="submitShipment">????</button>
+          </div>
+        </section>
+        <section class="panel full-row">
+          <h2>??????</h2>
+          <div class="form-grid">
+            <label>
+              ????
+              <select v-model="deliveryStatusForm.deliveryStatus" :disabled="!canUpdateDeliveryCurrentOrder">
+                <option value="SHIPPED">???</option>
+                <option value="IN_TRANSIT">???</option>
+                <option value="DELIVERED">???</option>
+              </select>
+            </label>
+            <label class="full">????<textarea v-model="deliveryStatusForm.deliveryRemark" :disabled="!canUpdateDeliveryCurrentOrder"></textarea></label>
+          </div>
+          <div class="form-actions">
+            <button class="primary" :disabled="!canUpdateDeliveryCurrentOrder" @click="submitDeliveryStatus">??????</button>
+          </div>
         </section>
       </section>
 

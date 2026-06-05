@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 public record OrderSummaryResponse(
     Long id,
     String orderNo,
+    Long userId,
     String orderStatus,
     String payStatus,
     String deliveryStatus,

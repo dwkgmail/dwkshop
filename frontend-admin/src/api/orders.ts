@@ -20,6 +20,7 @@ export interface OrderAmount {
 export interface OrderSummary {
   id: number;
   orderNo: string;
+  userId: number;
   orderStatus: string;
   payStatus: string;
   deliveryStatus: string;
@@ -35,7 +36,13 @@ export interface OrderDetail extends OrderSummary {
   receiverMobile: string;
   receiverAddress: string;
   remark?: string;
+  logisticsCompany?: string;
+  logisticsNo?: string;
+  deliveryRemark?: string;
   payExpireTime: string;
+  payTime?: string;
+  deliveryTime?: string;
+  finishTime?: string;
   amount: OrderAmount;
   items: Array<{
     id: number;
@@ -53,9 +60,23 @@ export interface OrderDetail extends OrderSummary {
 }
 
 export function getOrders() {
-  return request<OrderSummary[]>('/api/orders');
+  return request<OrderSummary[]>('/admin/orders');
 }
 
 export function getOrder(id: number) {
-  return request<OrderDetail>(`/api/orders/${id}`);
+  return request<OrderDetail>(`/admin/orders/${id}`);
+}
+
+export function shipOrder(id: number, payload: { logisticsCompany: string; logisticsNo: string; deliveryRemark?: string }) {
+  return request<OrderDetail>(`/admin/orders/${id}/ship`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateDeliveryStatus(id: number, payload: { deliveryStatus: string; deliveryRemark?: string }) {
+  return request<OrderDetail>(`/admin/orders/${id}/delivery-status`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
 }

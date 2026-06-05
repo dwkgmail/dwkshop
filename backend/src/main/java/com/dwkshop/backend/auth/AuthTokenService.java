@@ -54,6 +54,7 @@ public class AuthTokenService {
     private String issue(Long id, String subject, String role, String type, long ttlSeconds) {
         try {
             long expiresAt = Instant.now().getEpochSecond() + ttlSeconds;
+            // 这里实现的是轻量自定义 token：payload 编码后再做 HMAC-SHA256 签名。
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("id", id);
             payload.put("sub", subject);
@@ -71,6 +72,7 @@ public class AuthTokenService {
     private AuthPrincipal verify(String token, String expectedType) {
         try {
             String[] parts = token.split("\\.");
+            // 先校验签名，再解析内容，防止客户端直接篡改 token 载荷。
             if (parts.length != 2 || !sign(parts[0]).equals(parts[1])) {
                 throw new AuthException("登录状态无效，请重新登录");
             }
@@ -83,6 +85,7 @@ public class AuthTokenService {
             if (!expectedType.equals(type)) {
                 throw new AuthException("登录状态无效，请重新登录");
             }
+            // token 中只恢复最小身份信息，账号是否仍可用要靠业务层继续校验。
             Long id = ((Number) payload.get("id")).longValue();
             String subject = String.valueOf(payload.get("sub"));
             String role = String.valueOf(payload.get("role"));

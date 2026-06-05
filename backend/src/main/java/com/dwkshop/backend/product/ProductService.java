@@ -98,6 +98,7 @@ public class ProductService {
         ensureCategoryExists(request.categoryId());
         LocalDateTime now = LocalDateTime.now();
         Product product = new Product();
+        // 商品主信息、SKU 和购买须知分开保存，便于后台独立维护。
         applyProductRequest(product, request, now, true);
         Product saved = productRepository.save(product);
         List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
@@ -143,6 +144,7 @@ public class ProductService {
     }
 
     private void applyProductRequest(Product product, ProductUpsertRequest request, LocalDateTime now, boolean creating) {
+        // 对请求字段统一做默认值兜底，避免状态类字段出现 null。
         product.setCategoryId(request.categoryId());
         product.setProductCode(blankToDefault(request.productCode(), "P-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase()));
         product.setName(request.name().trim());
@@ -167,6 +169,7 @@ public class ProductService {
 
     private List<ProductSku> saveSkus(Long productId, List<ProductSkuRequest> requests, LocalDateTime now) {
         return requests.stream().map(request -> {
+            // 每次提交都按请求内容重建 SKU，保证数据库状态和后台表单一致。
             ProductSku sku = new ProductSku();
             sku.setProductId(productId);
             sku.setSkuCode(blankToDefault(request.skuCode(), "SKU-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase()));
@@ -187,6 +190,7 @@ public class ProductService {
     private ProductNotice saveNotice(Long productId, String title, String content, LocalDateTime now) {
         ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(productId).orElse(null);
         if (isBlank(content)) {
+            // 购买须知清空时不直接删记录，而是关闭启用标记保留历史。
             if (notice != null) {
                 notice.setEnabledFlag(false);
                 notice.setUpdatedAt(now);
@@ -225,6 +229,7 @@ public class ProductService {
         if (productIds.isEmpty()) {
             return Map.of();
         }
+        // 列表场景批量预加载 SKU，避免 DTO 转换时出现 N+1 查询。
         return productSkuRepository.findByProductIdIn(productIds).stream()
             .collect(Collectors.groupingBy(ProductSku::getProductId));
     }

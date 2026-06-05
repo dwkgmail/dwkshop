@@ -64,6 +64,7 @@ public class CartService {
         LocalDateTime now = LocalDateTime.now();
         CartItem item = cartItemRepository.findByUserIdAndSkuId(userId, sku.getId()).orElse(null);
         if (item == null) {
+            // 同一用户同一 SKU 在购物车中只保留一条记录，首次加入时直接创建。
             item = new CartItem();
             item.setUserId(userId);
             item.setProductId(product.getId());
@@ -73,6 +74,7 @@ public class CartService {
             item.setItemStatus(NORMAL);
             item.setCreatedAt(now);
         } else {
+            // 已存在则合并数量，避免购物车出现重复行。
             int mergedQuantity = item.getQuantity() + request.quantity();
             validateStock(sku, mergedQuantity);
             item.setQuantity(mergedQuantity);
@@ -155,6 +157,7 @@ public class CartService {
     }
 
     private CartResponse buildCartResponse(Long userId, List<CartItem> items) {
+        // 批量加载商品和 SKU，统一组装购物车响应，减少数据库往返次数。
         Map<Long, Product> productMap = productRepository.findAllById(items.stream().map(CartItem::getProductId).toList())
             .stream()
             .collect(Collectors.toMap(Product::getId, Function.identity()));
@@ -203,6 +206,7 @@ public class CartService {
     }
 
     private CartItemState evaluateState(CartItem item, Product product, ProductSku sku) {
+        // 购物车项是否可勾选，由商品状态、SKU 状态和库存实时共同决定。
         if (product == null || Boolean.TRUE.equals(product.getDeletedFlag())) {
             return new CartItemState(OFF_SALE, "商品不存在", false);
         }

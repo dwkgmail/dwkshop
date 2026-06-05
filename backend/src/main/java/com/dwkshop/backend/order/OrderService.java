@@ -105,9 +105,11 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public ConfirmOrderResponse confirm(Long userId, ConfirmOrderRequest request) {
+        // 提交订单前先完成一次结算，后续创建订单必须携带本次结算 token。
         SettlementCalculation calculation = calculate(userId, request);
         String token = "SETTLE-" + UUID.randomUUID();
         ConfirmOrderResponse response = toConfirmResponse(token, calculation, request.remark());
+        // 在内存中暂存本次结算快照，用于校验金额并拦截重复提交。
         settlementSessions.put(token, new SettlementSession(userId, request, response.amount().payAmount(), false));
         return response;
     }
@@ -116,18 +118,20 @@ public class OrderService {
     public OrderResponse create(Long userId, CreateOrderRequest request) {
         SettlementSession session = settlementSessions.get(request.settlementToken());
         if (session == null || !session.userId().equals(userId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "璁㈠崟淇℃伅宸茶繃鏈燂紝璇烽噸鏂扮‘璁?");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单信息已过期，请重新确认");
         }
         synchronized (session) {
+            // 同一个结算会话只允许消费一次，避免重复点击造成重复下单。
             if (session.used()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "璁㈠崟宸插垱寤猴紝璇峰嬁閲嶅鎻愪氦");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已创建，请勿重复提交");
             }
+            // 创建订单前重新结算一次，确保库存、优惠券、积分等实时数据未发生变化。
             SettlementCalculation calculation = calculate(userId, session.request());
             if (!calculation.amount().payAmount().equals(request.expectedPayAmount())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "璁㈠崟閲戦宸插彉鍖栵紝璇烽噸鏂扮‘璁?");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单金额已变化，请重新确认");
             }
             if (!session.expectedPayAmount().equals(request.expectedPayAmount())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "璁㈠崟閲戦宸插彉鍖栵紝璇烽噸鏂扮‘璁?");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单金额已变化，请重新确认");
             }
             OrderResponse order = persistOrder(userId, session.request(), calculation, request.remark());
             session.markUsed();
@@ -153,7 +157,7 @@ public class OrderService {
     @Transactional(readOnly = true)
     public OrderResponse getOrder(Long userId, Long orderId) {
         TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "璁㈠崟涓嶅瓨鍦?"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
         return toOrderResponse(order);
     }
 
@@ -167,9 +171,9 @@ public class OrderService {
     @Transactional
     public OrderResponse cancel(Long userId, Long orderId) {
         TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "璁㈠崟涓嶅瓨鍦?"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
         if (!"WAIT_PAY".equals(order.getOrderStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "褰撳墠璁㈠崟涓嶅彲鍙栨秷");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前订单不可取消");
         }
         order.setOrderStatus("CANCELED");
         order.setPayStatus("CLOSED");
@@ -182,12 +186,12 @@ public class OrderService {
     @Transactional
     public OrderResponse pay(Long userId, Long orderId) {
         TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
         if ("PAID".equals(order.getPayStatus())) {
             return toOrderResponse(order);
         }
         if (!"WAIT_PAY".equals(order.getOrderStatus()) || !"UNPAID".equals(order.getPayStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order cannot be paid");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前订单不可支付");
         }
         LocalDateTime now = LocalDateTime.now();
         if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
@@ -196,7 +200,7 @@ public class OrderService {
             order.setCancelTime(now);
             order.setUpdatedAt(now);
             tradeOrderRepository.save(order);
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order payment expired");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单支付已超时");
         }
         order.setOrderStatus("WAIT_SHIP");
         order.setPayStatus("PAID");
@@ -250,6 +254,7 @@ public class OrderService {
 
     private SettlementCalculation calculate(Long userId, ConfirmOrderRequest request) {
         String sourceType = normalizeSourceType(request.sourceType());
+        // 先把购物车/立即购买两种入口统一整理成结算项，后续金额逻辑都基于它。
         List<SettlementItem> items = resolveItems(userId, sourceType, request);
         validateItems(items);
         UserAddress address = resolveAddress(userId, request.addressId());
@@ -266,61 +271,64 @@ public class OrderService {
 
     private List<SettlementItem> resolveItems(Long userId, String sourceType, ConfirmOrderRequest request) {
         if (CART.equals(sourceType)) {
+            // 购物车结算未指定条目时，默认结算当前用户购物车中的全部商品。
             List<CartItem> cartItems = request.cartItemIds() == null || request.cartItemIds().isEmpty()
                 ? cartItemRepository.findByUserIdOrderByIdDesc(userId)
                 : request.cartItemIds().stream()
                     .map(id -> cartItemRepository.findByIdAndUserId(id, userId)
-                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "璐墿杞﹀晢鍝佷笉瀛樺湪")))
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "购物车商品不存在")))
                     .toList();
             if (cartItems.isEmpty()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "璇烽€夋嫨瑕佺粨绠楃殑鍟嗗搧");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择要结算的商品");
             }
             return cartItems.stream().map(item -> toSettlementItem(item, item.getSkuId(), item.getQuantity())).toList();
         }
         int quantity = request.quantity() == null ? 1 : request.quantity();
         if (request.skuId() == null || quantity <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "璇烽€夋嫨鍟嗗搧瑙勬牸鍜屾暟閲?");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择商品规格和数量");
         }
         return List.of(toSettlementItem(null, request.skuId(), quantity));
     }
 
     private SettlementItem toSettlementItem(CartItem cartItem, Long skuId, int quantity) {
         ProductSku sku = productSkuRepository.findById(skuId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "鍟嗗搧瑙勬牸宸插け鏁?"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格已失效"));
         Product product = productRepository.findById(sku.getProductId())
             .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "鍟嗗搧涓嶅瓨鍦?"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品不存在"));
         ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(product.getId()).orElse(null);
         return new SettlementItem(cartItem == null ? null : cartItem.getId(), product, sku, notice, quantity);
     }
 
     private void validateItems(List<SettlementItem> items) {
         for (SettlementItem item : items) {
+            // 结算前统一检查商品状态、SKU 状态和库存，避免脏数据进入下单流程。
             if (!ON_SALE.equals(item.product().getSaleStatus())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "閮ㄥ垎鍟嗗搧宸蹭笅鏋讹紝璇烽噸鏂扮‘璁?");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品已下架，请重新确认");
             }
             if (!ENABLED.equals(item.sku().getSkuStatus())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "閮ㄥ垎鍟嗗搧瑙勬牸宸插け鏁堬紝璇烽噸鏂伴€夋嫨");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
             }
             if (item.sku().getStock() < item.quantity()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "搴撳瓨涓嶈冻锛岃淇敼璐拱鏁伴噺");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "库存不足，请修改购买数量");
             }
         }
         boolean hasNormalSingleBuy = items.stream().anyMatch(item -> Boolean.TRUE.equals(item.product().getAllowSingleBuy()));
         boolean hasOnlyCannotSingleBuy = items.stream().allMatch(item -> !Boolean.TRUE.equals(item.product().getAllowSingleBuy()));
+        // 不可单独购买的商品不能脱离搭售场景单独下单。
         if (hasOnlyCannotSingleBuy || (!hasNormalSingleBuy && items.size() > 0)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "鍟嗗搧涓嶅彲鍗曠嫭璐拱");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品不可单独购买");
         }
     }
 
     private UserAddress resolveAddress(Long userId, Long addressId) {
         if (addressId != null) {
             return userAddressRepository.findByIdAndUserId(addressId, userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "鏀惰揣鍦板潃鏃犳晥"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "收货地址不存在"));
         }
         return userAddressRepository.findFirstByUserIdAndDefaultFlagTrue(userId)
             .or(() -> userAddressRepository.findFirstByUserIdOrderByIdAsc(userId))
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "璇烽€夋嫨鏀惰揣鍦板潃"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "请先添加收货地址"));
     }
 
     private int calculateFreight(List<SettlementItem> items) {
@@ -332,6 +340,7 @@ public class OrderService {
         List<CouponUser> userCoupons = couponUserRepository.findByUserIdAndUserCouponStatus(userId, "UNUSED");
         Map<Long, Coupon> couponMap = couponRepository.findAllById(userCoupons.stream().map(CouponUser::getCouponId).toList()).stream()
             .collect(Collectors.toMap(Coupon::getId, coupon -> coupon));
+        // 仅保留状态有效、满足门槛且处于可用时间窗内的优惠券。
         List<CouponCandidate> candidates = userCoupons.stream()
             .map(userCoupon -> new CouponCandidate(userCoupon, couponMap.get(userCoupon.getCouponId())))
             .filter(candidate -> candidate.coupon() != null)
@@ -347,8 +356,9 @@ public class OrderService {
             selected = candidates.stream()
                 .filter(candidate -> candidate.userCoupon().getId().equals(requestedCouponUserId))
                 .findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "浼樻儬鍒镐笉鍙敤"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "优惠券不可用"));
         } else {
+            // 用户未指定时自动选最优券：先比优惠金额，再优先快过期的券。
             selected = candidates.stream()
                 .max(Comparator
                     .comparing((CouponCandidate candidate) -> candidate.coupon().getDiscountAmount())
@@ -367,12 +377,14 @@ public class OrderService {
         UserPointAccount account = userPointAccountRepository.findByUserId(userId).orElse(null);
         int availablePoints = account == null ? 0 : account.getAvailablePoints();
         boolean selected = visible && Boolean.TRUE.equals(usePoints) && availablePoints > 0;
+        // 积分按固定比例抵扣，但最低只抵到 0，不会把应付金额抵成负数。
         int deduction = selected ? Math.min(availablePoints / POINT_EXCHANGE_RATE, Math.max(remainingAmount, 0)) : 0;
         return new PointSelection(visible, availablePoints, deduction, selected);
     }
 
     private OrderResponse persistOrder(Long userId, ConfirmOrderRequest request, SettlementCalculation calculation, String createRemark) {
         LocalDateTime now = LocalDateTime.now();
+        // 先落主订单，再保存明细、金额快照和优惠券使用状态。
         TradeOrder order = new TradeOrder();
         order.setOrderNo("SO" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(now) + UUID.randomUUID().toString().substring(0, 6).toUpperCase());
         order.setUserId(userId);
@@ -397,13 +409,14 @@ public class OrderService {
         TradeOrder savedOrder = tradeOrderRepository.save(order);
 
         for (SettlementItem item : calculation.items()) {
+            // 通过行级锁再次扣减库存并增加锁定库存，避免并发下单超卖。
             ProductSku sku = productSkuRepository.findByIdForUpdate(item.sku().getId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "鍟嗗搧瑙勬牸宸插け鏁?"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格已失效"));
             if (!ENABLED.equals(sku.getSkuStatus())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "閮ㄥ垎鍟嗗搧瑙勬牸宸插け鏁堬紝璇烽噸鏂伴€夋嫨");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
             }
             if (sku.getStock() < item.quantity()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "搴撳瓨涓嶈冻锛岃淇敼璐拱鏁伴噺");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "库存不足，请修改购买数量");
             }
             sku.setStock(sku.getStock() - item.quantity());
             sku.setLockedStock(sku.getLockedStock() + item.quantity());
@@ -441,6 +454,7 @@ public class OrderService {
         tradeOrderAmountRepository.save(amount);
 
         if (calculation.selectedCouponUser() != null) {
+            // 优惠券在订单真正创建成功后再核销，避免只在结算页就占用。
             CouponUser couponUser = calculation.selectedCouponUser();
             couponUser.setUserCouponStatus("USED");
             couponUser.setUsedAt(now);
@@ -449,6 +463,7 @@ public class OrderService {
         }
 
         if (CART.equals(calculation.sourceType())) {
+            // 购物车来源的订单创建成功后，再删除对应购物车项。
             List<Long> cartItemIds = calculation.items().stream()
                 .map(SettlementItem::cartItemId)
                 .filter(id -> id != null)

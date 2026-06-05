@@ -34,6 +34,7 @@ public class AuthService {
     }
 
     public LoginResponse loginAdmin(String username, String password) {
+        // 后台登录只允许 ACTIVE 账号通过，并统一走密码哈希校验。
         AdminUser admin = adminUserRepository.findByUsername(username)
             .filter(item -> "ACTIVE".equals(item.getStatus()))
             .orElseThrow(() -> new AuthException("账号或密码错误"));
@@ -58,6 +59,7 @@ public class AuthService {
         if (userRepository.existsByMobile(mobile)) {
             throw new AuthException("手机号已注册");
         }
+        // 当前项目未引入独立号段服务，用户 ID 通过现有最大值顺延生成。
         User user = new User();
         user.setId(nextUserId());
         user.setMobile(mobile);
@@ -106,6 +108,7 @@ public class AuthService {
     }
 
     public LoginResponse refresh(String refreshToken, String expectedRole) {
+        // 刷新 token 时除了验签和过期时间，还会校验调用方期望的角色类型。
         AuthPrincipal principal = tokenService.verifyRefresh(refreshToken);
         if (!expectedRole.equals(principal.role())) {
             throw new AuthException("登录状态无效，请重新登录");
@@ -123,6 +126,7 @@ public class AuthService {
     }
 
     private LoginResponse toResponse(Long id, String subject, String name, String role) {
+        // 每次登录或刷新都会重新签发 access token 与 refresh token。
         String token = tokenService.issue(id, subject, role);
         String refreshToken = tokenService.issueRefresh(id, subject, role);
         return new LoginResponse(token, refreshToken, "Bearer", ttlSeconds, id, name, role);

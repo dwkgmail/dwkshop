@@ -8,6 +8,7 @@ public record OrderSummaryResponse(
     String orderStatus,
     String payStatus,
     String deliveryStatus,
+    String aftersaleStatus,
     Integer payAmount,
     String payAmountText,
     LocalDateTime createdAt

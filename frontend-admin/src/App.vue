@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { changeAdminPassword, loginAdmin, logoutAdmin } from './api/auth';
 import { AUTH_EXPIRED_EVENT, clearAuthToken, getAuthToken, setAuthTokens } from './api/client';
+import { approveAftersale, getAftersales, rejectAftersale, type Aftersale } from './api/aftersales';
 import {
   createProduct,
   getAdminProducts,
@@ -24,6 +25,7 @@ type Page =
   | 'product-create'
   | 'product-edit'
   | 'orders'
+  | 'aftersales'
   | 'order-detail'
   | 'placeholder';
 
@@ -40,6 +42,7 @@ const toast = ref('');
 const products = ref<AdminProduct[]>([]);
 const categories = ref<Category[]>([]);
 const orders = ref<OrderSummary[]>([]);
+const aftersales = ref<Aftersale[]>([]);
 const currentOrder = ref<OrderDetail | null>(null);
 const orderDetailsById = ref<Record<number, OrderDetail>>({});
 const editingId = ref<number | null>(null);
@@ -110,11 +113,13 @@ const dashboard = computed(() => {
   const orderCount = orders.value.length;
   const payAmount = orders.value.reduce((sum, item) => sum + item.payAmount, 0);
   const waitShip = orders.value.filter((item) => item.orderStatus === 'WAIT_SHIP').length;
+  const refundApplying = aftersales.value.filter((item) => item.aftersaleStatus === 'APPLYING').length;
   const lowStock = products.value.filter((item) => item.stock <= 10).length;
   return {
     orderCount,
     payAmountText: formatCents(payAmount),
     waitShip,
+    refundApplying,
     lowStock
   };
 });
@@ -177,6 +182,7 @@ function resetSession(message?: string) {
   clearAuthToken();
   products.value = [];
   orders.value = [];
+  aftersales.value = [];
   categories.value = [];
   currentOrder.value = null;
   orderDetailsById.value = {};
@@ -210,6 +216,9 @@ function nav(key: string) {
   } else if (key === 'orders') {
     page.value = 'orders';
     loadOrders();
+  } else if (key === 'aftersale') {
+    page.value = 'aftersales';
+    loadAftersales();
   } else {
     placeholderTitle.value = menu.find((item) => item.key === key)?.label ?? '妯″潡';
     page.value = 'placeholder';
@@ -218,7 +227,7 @@ function nav(key: string) {
 
 async function loadDashboard() {
   await runTask(async () => {
-    await Promise.all([loadProductsQuietly(), loadOrdersQuietly(), loadCategoriesQuietly()]);
+    await Promise.all([loadProductsQuietly(), loadOrdersQuietly(), loadAftersalesQuietly(), loadCategoriesQuietly()]);
   });
 }
 
@@ -231,6 +240,12 @@ async function loadProducts() {
 async function loadOrders() {
   await runTask(async () => {
     await loadOrdersQuietly();
+  });
+}
+
+async function loadAftersales() {
+  await runTask(async () => {
+    await loadAftersalesQuietly();
   });
 }
 
@@ -252,6 +267,10 @@ async function loadOrdersQuietly() {
     if (detail) acc[detail.id] = detail;
     return acc;
   }, {});
+}
+
+async function loadAftersalesQuietly() {
+  aftersales.value = await getAftersales();
 }
 
 function resetProductForm() {
@@ -405,6 +424,23 @@ async function openOrderDetail(id: number) {
   });
 }
 
+async function approveRefund(id: number) {
+  await runTask(async () => {
+    await approveAftersale(id);
+    await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly()]);
+    showToast('Refund approved');
+  });
+}
+
+async function rejectRefund(id: number) {
+  const rejectReason = window.prompt('Reject reason', 'Refund request rejected')?.trim() || 'Refund request rejected';
+  await runTask(async () => {
+    await rejectAftersale(id, rejectReason);
+    await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly()]);
+    showToast('Refund rejected');
+  });
+}
+
 function statusText(status: string) {
   const map: Record<string, string> = {
     ON_SALE: 'On sale',
@@ -416,7 +452,11 @@ function statusText(status: string) {
     FINISHED: 'Finished',
     UNPAID: 'Unpaid',
     PAID: 'Paid',
-    UNSHIPPED: 'Unshipped'
+    UNSHIPPED: 'Unshipped',
+    NONE: 'None',
+    APPLYING: 'Refund applying',
+    REJECTED: 'Refund rejected',
+    REFUNDED: 'Refunded'
   };
   return map[status] ?? status;
 }
@@ -458,7 +498,7 @@ onUnmounted(() => {
     <aside class="sidebar">
       <div class="brand">DWK Shop 鍚庡彴</div>
       <nav>
-        <button v-for="item in menu" :key="item.key" :class="{ active: page === item.key || (item.key === 'products' && page.startsWith('product')) || (item.key === 'orders' && page.startsWith('order')) }" @click="nav(item.key)">
+        <button v-for="item in menu" :key="item.key" :class="{ active: page === item.key || (item.key === 'products' && page.startsWith('product')) || (item.key === 'orders' && page.startsWith('order')) || (item.key === 'aftersale' && page === 'aftersales') }" @click="nav(item.key)">
           {{ item.label }}
         </button>
       </nav>
@@ -474,6 +514,7 @@ onUnmounted(() => {
               page === 'product-create' ? '鏂板鍟嗗搧' :
               page === 'product-edit' ? '缂栬緫鍟嗗搧' :
               page === 'orders' ? '璁㈠崟鍒楄〃' :
+              page === 'aftersales' ? 'After-sale' :
               page === 'order-detail' ? '璁㈠崟璇︽儏' : placeholderTitle
             }}
           </h1>
@@ -497,7 +538,7 @@ onUnmounted(() => {
           <article><span>璁㈠崟鎬绘暟</span><strong>{{ dashboard.orderCount }}</strong></article>
           <article><span>鏀粯閲戦</span><strong>楼{{ dashboard.payAmountText }}</strong></article>
           <article><span>Waiting shipment</span><strong>{{ dashboard.waitShip }}</strong></article>
-          <article><span>搴撳瓨棰勮</span><strong>{{ dashboard.lowStock }}</strong></article>
+          <article><span>Refund applying</span><strong>{{ dashboard.refundApplying }}</strong></article>
         </section>
         <section class="dashboard-grid">
           <div class="panel">
@@ -511,6 +552,7 @@ onUnmounted(() => {
             <div class="quick-actions">
               <button @click="openCreate">鏂板鍟嗗搧</button>
               <button @click="nav('orders')">鏌ョ湅璁㈠崟</button>
+              <button @click="nav('aftersale')">After-sale</button>
               <button @click="nav('products')">鍟嗗搧绠＄悊</button>
             </div>
           </div>
@@ -650,11 +692,48 @@ onUnmounted(() => {
         </section>
       </section>
 
+      <section v-else-if="page === 'aftersales'" class="page">
+        <section class="panel table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th>After-sale No</th>
+                <th>Order No</th>
+                <th>Mobile</th>
+                <th>Amount</th>
+                <th>Reason</th>
+                <th>Status</th>
+                <th>Apply time</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in aftersales" :key="item.id">
+                <td>{{ item.aftersaleNo }}</td>
+                <td>{{ item.orderNo }}</td>
+                <td>{{ item.receiverMobile }}</td>
+                <td>楼{{ item.refundAmountText }}</td>
+                <td>{{ item.reason }}</td>
+                <td><em class="status">{{ statusText(item.aftersaleStatus) }}</em></td>
+                <td>{{ item.applyTime?.replace('T', ' ').slice(0, 19) }}</td>
+                <td class="actions">
+                  <button v-if="item.aftersaleStatus === 'APPLYING'" @click="approveRefund(item.id)">Approve</button>
+                  <button v-if="item.aftersaleStatus === 'APPLYING'" @click="rejectRefund(item.id)">Reject</button>
+                  <button @click="openOrderDetail(item.orderId)">Order</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="aftersales.length === 0" class="empty">No after-sale requests</div>
+        </section>
+      </section>
+
       <section v-else-if="page === 'order-detail' && currentOrder" class="page detail-grid">
         <section class="panel info-list">
           <h2>璁㈠崟淇℃伅</h2>
           <div><span>璁㈠崟缂栧彿</span><strong>{{ currentOrder.orderNo }}</strong></div>
           <div><span>璁㈠崟鐘舵€</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
+          <div><span>After-sale</span><strong>{{ statusText(currentOrder.aftersaleStatus) }}</strong></div>
           <div><span>涓嬪崟鏃堕棿</span><strong>{{ currentOrder.createdAt?.replace('T', ' ').slice(0, 19) }}</strong></div>
           <div><span>澶囨敞</span><strong>{{ currentOrder.remark || '-' }}</strong></div>
         </section>

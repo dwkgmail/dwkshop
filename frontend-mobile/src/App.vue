@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { changeUserPassword, loginUser, logoutUser, registerUser } from './api/auth';
+import { createAftersale } from './api/aftersales';
 import { AUTH_EXPIRED_EVENT, clearAuthToken, getAuthToken, setAuthTokens } from './api/client';
 import {
   addCartItem,
@@ -397,6 +398,16 @@ async function cancelCurrentOrder(id: number) {
   });
 }
 
+async function applyRefund(order: OrderDetail) {
+  const reason = window.prompt('Refund reason', 'I want to request a refund')?.trim();
+  if (!reason) return;
+  await runTask(async () => {
+    await createAftersale(order.id, reason);
+    currentOrder.value = await getOrder(order.id);
+    showToast('Refund request submitted');
+  });
+}
+
 async function changeCartQuantity(id: number, quantity: number) {
   if (quantity < 1) return;
   await runTask(async () => {
@@ -429,7 +440,10 @@ function statusText(status: string) {
     CANCELED: 'Canceled',
     WAIT_SHIP: 'Waiting shipment',
     WAIT_RECEIVE: 'Waiting receipt',
-    FINISHED: 'Finished'
+    FINISHED: 'Finished',
+    REFUNDED: 'Refunded',
+    APPLYING: 'Refund applying',
+    REJECTED: 'Refund rejected'
   };
   return map[status] ?? status;
 }
@@ -731,6 +745,7 @@ onUnmounted(() => {
       <section v-else-if="route.view === 'order-detail' && currentOrder" class="view">
         <section class="panel detail-list">
           <div><span>璁㈠崟鐘舵€</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
+          <div><span>After-sale</span><strong>{{ statusText(currentOrder.aftersaleStatus) }}</strong></div>
           <div><span>璁㈠崟缂栧彿</span><strong>{{ currentOrder.orderNo }}</strong></div>
           <div><span>鏀惰揣淇℃伅</span><strong>{{ currentOrder.receiverName }} {{ currentOrder.receiverMobile }}</strong></div>
           <p>{{ currentOrder.receiverAddress }}</p>
@@ -747,6 +762,7 @@ onUnmounted(() => {
           <div><span>瀹炰粯閲戦</span><strong class="orange">楼{{ currentOrder.payAmountText }}</strong></div>
         </section>
         <button v-if="currentOrder.orderStatus === 'WAIT_PAY'" class="ghost wide" @click="cancelCurrentOrder(currentOrder.id)">鍙栨秷璁㈠崟</button>
+        <button v-if="currentOrder.payStatus === 'PAID' && currentOrder.aftersaleStatus === 'NONE'" class="ghost wide" @click="applyRefund(currentOrder)">Apply refund</button>
       </section>
 
       <section v-else-if="route.view === 'mine'" class="view mine-view">

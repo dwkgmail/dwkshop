@@ -140,6 +140,7 @@ public class OrderService {
                 order.getOrderStatus(),
                 order.getPayStatus(),
                 order.getDeliveryStatus(),
+                order.getAftersaleStatus(),
                 order.getPayAmount(),
                 PriceFormatter.formatCents(order.getPayAmount()),
                 order.getCreatedAt()
@@ -461,6 +462,7 @@ public class OrderService {
             order.getOrderStatus(),
             order.getPayStatus(),
             order.getDeliveryStatus(),
+            order.getAftersaleStatus(),
             order.getPayAmount(),
             PriceFormatter.formatCents(order.getPayAmount()),
             order.getReceiverName(),

@@ -10,6 +10,7 @@ public record OrderResponse(
     String orderStatus,
     String payStatus,
     String deliveryStatus,
+    String aftersaleStatus,
     Integer payAmount,
     String payAmountText,
     String receiverName,

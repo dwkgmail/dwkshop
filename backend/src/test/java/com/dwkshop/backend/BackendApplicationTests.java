@@ -409,6 +409,53 @@ class BackendApplicationTests {
     }
 
     @Test
+    void aftersaleRefundCanBeApprovedAndReleasesLockedStock() throws Exception {
+        clearCart();
+        MvcResult confirm = mockMvc.perform(post("/api/orders/confirm").contentType("application/json").content("""
+            {"sourceType":"BUY_NOW","skuId":1,"quantity":2}
+            """))
+            .andExpect(status().isOk())
+            .andReturn();
+        String token = com.jayway.jsonpath.JsonPath.read(confirm.getResponse().getContentAsString(), "$.settlementToken");
+        Integer payAmount = com.jayway.jsonpath.JsonPath.read(confirm.getResponse().getContentAsString(), "$.amount.payAmount");
+
+        MvcResult created = mockMvc.perform(post("/api/orders/create").contentType("application/json").content("""
+            {"settlementToken":"%s","expectedPayAmount":%d}
+            """.formatted(token, payAmount)))
+            .andExpect(status().isOk())
+            .andReturn();
+        Integer orderId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/api/orders/{id}/pay", orderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"));
+        assertThat(jdbcTemplate.queryForObject("select stock from product_sku where id = 1", Integer.class)).isEqualTo(118);
+        assertThat(jdbcTemplate.queryForObject("select locked_stock from product_sku where id = 1", Integer.class)).isEqualTo(2);
+
+        MvcResult applied = mockMvc.perform(post("/api/aftersales").contentType("application/json").content("""
+            {"orderId":%d,"reason":"changed mind"}
+            """.formatted(orderId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("APPLYING"))
+            .andExpect(jsonPath("$.refundAmount").value(payAmount))
+            .andReturn();
+        Integer aftersaleId = com.jayway.jsonpath.JsonPath.read(applied.getResponse().getContentAsString(), "$.id");
+
+        mockMvc.perform(post("/admin/aftersales/{id}/approve", aftersaleId)
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+
+        mockMvc.perform(get("/api/orders/{id}", orderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("REFUNDED"))
+            .andExpect(jsonPath("$.payStatus").value("REFUNDED"))
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+        assertThat(jdbcTemplate.queryForObject("select stock from product_sku where id = 1", Integer.class)).isEqualTo(120);
+        assertThat(jdbcTemplate.queryForObject("select locked_stock from product_sku where id = 1", Integer.class)).isZero();
+    }
+
+    @Test
     void createOrderRejectsAmountChangedOffSaleAndStockNotEnough() throws Exception {
         clearCart();
         MvcResult confirm = mockMvc.perform(post("/api/orders/confirm").contentType("application/json").content("""
@@ -472,6 +519,7 @@ class BackendApplicationTests {
 
     private void clearCart() {
         jdbcTemplate.update("update coupon_user set user_coupon_status = 'UNUSED', used_at = null, order_id = null");
+        jdbcTemplate.update("delete from aftersale_order");
         jdbcTemplate.update("delete from trade_order_amount");
         jdbcTemplate.update("delete from trade_order_item");
         jdbcTemplate.update("delete from trade_order");

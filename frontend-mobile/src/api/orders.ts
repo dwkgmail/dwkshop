@@ -86,6 +86,7 @@ export interface OrderSummary {
   orderStatus: string;
   payStatus: string;
   deliveryStatus: string;
+  aftersaleStatus: string;
   payAmount: number;
   payAmountText: string;
   createdAt: string;

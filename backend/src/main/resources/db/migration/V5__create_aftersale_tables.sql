@@ -1,0 +1,22 @@
+CREATE TABLE aftersale_order (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  aftersale_no VARCHAR(64) NOT NULL,
+  order_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  aftersale_type VARCHAR(30) NOT NULL DEFAULT 'REFUND',
+  aftersale_status VARCHAR(30) NOT NULL,
+  refund_amount INT NOT NULL DEFAULT 0,
+  reason VARCHAR(255) NOT NULL,
+  reject_reason VARCHAR(255) NULL,
+  apply_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  audit_time DATETIME NULL,
+  refund_time DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_aftersale_no (aftersale_no),
+  KEY idx_aftersale_order_id (order_id),
+  KEY idx_aftersale_user_id (user_id),
+  KEY idx_aftersale_status (aftersale_status),
+  CONSTRAINT fk_aftersale_order FOREIGN KEY (order_id) REFERENCES trade_order (id),
+  CONSTRAINT fk_aftersale_user FOREIGN KEY (user_id) REFERENCES `user` (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

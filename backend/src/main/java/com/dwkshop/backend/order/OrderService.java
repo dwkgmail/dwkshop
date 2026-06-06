@@ -36,14 +36,16 @@ import com.dwkshop.backend.order.dto.OrderResponse;
 import com.dwkshop.backend.order.dto.OrderSummaryResponse;
 import com.dwkshop.backend.order.dto.PointDeductionResponse;
 import com.dwkshop.backend.product.PriceFormatter;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,7 +77,9 @@ public class OrderService {
     private final TradeOrderRepository tradeOrderRepository;
     private final TradeOrderItemRepository tradeOrderItemRepository;
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
-    private final Map<String, SettlementSession> settlementSessions = new ConcurrentHashMap<>();
+    private final SettlementSessionStore settlementSessionStore;
+    private final ApplicationEventPublisher eventPublisher;
+    private final Duration settlementTtl;
 
     public OrderService(
         CartItemRepository cartItemRepository,
@@ -88,7 +92,10 @@ public class OrderService {
         UserPointAccountRepository userPointAccountRepository,
         TradeOrderRepository tradeOrderRepository,
         TradeOrderItemRepository tradeOrderItemRepository,
-        TradeOrderAmountRepository tradeOrderAmountRepository
+        TradeOrderAmountRepository tradeOrderAmountRepository,
+        SettlementSessionStore settlementSessionStore,
+        ApplicationEventPublisher eventPublisher,
+        @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
         this.cartItemRepository = cartItemRepository;
         this.productRepository = productRepository;
@@ -101,6 +108,9 @@ public class OrderService {
         this.tradeOrderRepository = tradeOrderRepository;
         this.tradeOrderItemRepository = tradeOrderItemRepository;
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
+        this.settlementSessionStore = settlementSessionStore;
+        this.eventPublisher = eventPublisher;
+        this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
     }
 
     @Transactional(readOnly = true)
@@ -110,13 +120,14 @@ public class OrderService {
         String token = "SETTLE-" + UUID.randomUUID();
         ConfirmOrderResponse response = toConfirmResponse(token, calculation, request.remark());
         // 在内存中暂存本次结算快照，用于校验金额并拦截重复提交。
-        settlementSessions.put(token, new SettlementSession(userId, request, response.amount().payAmount(), false));
+        settlementSessionStore.save(token, new SettlementSession(userId, request, response.amount().payAmount()), settlementTtl);
         return response;
     }
 
     @Transactional
     public OrderResponse create(Long userId, CreateOrderRequest request) {
-        SettlementSession session = settlementSessions.get(request.settlementToken());
+        SettlementSession session = settlementSessionStore.consume(request.settlementToken())
+            .orElse(null);
         if (session == null || !session.userId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单信息已过期，请重新确认");
         }
@@ -134,8 +145,13 @@ public class OrderService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单金额已变化，请重新确认");
             }
             OrderResponse order = persistOrder(userId, session.request(), calculation, request.remark());
-            session.markUsed();
-            settlementSessions.remove(request.settlementToken());
+            eventPublisher.publishEvent(new OrderCreatedEvent(
+                order.id(),
+                order.orderNo(),
+                order.userId(),
+                order.payAmount(),
+                order.createdAt()
+            ));
             return order;
         }
     }
@@ -678,37 +694,4 @@ public class OrderService {
     private record PointSelection(boolean visible, int availablePoints, int deductionAmount, boolean selected) {
     }
 
-    private static final class SettlementSession {
-        private final Long userId;
-        private final ConfirmOrderRequest request;
-        private final Integer expectedPayAmount;
-        private boolean used;
-
-        private SettlementSession(Long userId, ConfirmOrderRequest request, Integer expectedPayAmount, boolean used) {
-            this.userId = userId;
-            this.request = request;
-            this.expectedPayAmount = expectedPayAmount;
-            this.used = used;
-        }
-
-        Long userId() {
-            return userId;
-        }
-
-        ConfirmOrderRequest request() {
-            return request;
-        }
-
-        Integer expectedPayAmount() {
-            return expectedPayAmount;
-        }
-
-        boolean used() {
-            return used;
-        }
-
-        void markUsed() {
-            this.used = true;
-        }
-    }
 }

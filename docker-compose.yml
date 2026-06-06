@@ -16,6 +16,30 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
+  redis:
+    image: redis:7.4-alpine
+    container_name: dwkshop-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+  rabbitmq:
+    image: rabbitmq:4.0-management
+    container_name: dwkshop-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: dwkshop
+      RABBITMQ_DEFAULT_PASS: dwkshop
+      TZ: Asia/Shanghai
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
 
 volumes:
   mysql_data:
+  redis_data:
+  rabbitmq_data:

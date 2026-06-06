@@ -16,6 +16,11 @@ spring:
       timeout: 2s
       repositories:
         enabled: false
+    elasticsearch:
+      repositories:
+        enabled: ${DWKSHOP_ES_ENABLED:true}
+  elasticsearch:
+    uris: ${DWKSHOP_ES_URIS:http://localhost:9200}
   rabbitmq:
     host: localhost
     port: 5672
@@ -48,3 +53,7 @@ dwkshop:
     order-exchange: dwkshop.order.exchange
     order-created-queue: dwkshop.order.created
     order-created-routing-key: order.created
+  search:
+    elasticsearch:
+      enabled: ${DWKSHOP_ES_ENABLED:true}
+      index-name: ${DWKSHOP_ES_PRODUCT_INDEX:dwkshop_products}

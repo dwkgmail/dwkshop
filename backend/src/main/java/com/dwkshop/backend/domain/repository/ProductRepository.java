@@ -13,4 +13,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByDeletedFlagFalseAndSaleStatusAndCategoryIdOrderByIdDesc(String saleStatus, Long categoryId);
 
     List<Product> findByDeletedFlagFalseAndSaleStatusAndNameContainingOrderByIdDesc(String saleStatus, String name);
+
+    List<Product> findByIdIn(List<Long> ids);
 }

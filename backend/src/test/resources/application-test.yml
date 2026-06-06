@@ -11,9 +11,17 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  data:
+    elasticsearch:
+      repositories:
+        enabled: false
   rabbitmq:
     listener:
       simple:
         auto-startup: false
       direct:
         auto-startup: false
+dwkshop:
+  search:
+    elasticsearch:
+      enabled: false

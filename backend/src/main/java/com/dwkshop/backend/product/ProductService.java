@@ -15,8 +15,10 @@ import com.dwkshop.backend.product.dto.ProductSkuRequest;
 import com.dwkshop.backend.product.dto.ProductSkuResponse;
 import com.dwkshop.backend.product.dto.ProductSummaryResponse;
 import com.dwkshop.backend.product.dto.ProductUpsertRequest;
+import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -39,17 +41,20 @@ public class ProductService {
     private final ProductSkuRepository productSkuRepository;
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductNoticeRepository productNoticeRepository;
+    private final ProductSearchGateway productSearchGateway;
 
     public ProductService(
         ProductRepository productRepository,
         ProductSkuRepository productSkuRepository,
         ProductCategoryRepository productCategoryRepository,
-        ProductNoticeRepository productNoticeRepository
+        ProductNoticeRepository productNoticeRepository,
+        ProductSearchGateway productSearchGateway
     ) {
         this.productRepository = productRepository;
         this.productSkuRepository = productSkuRepository;
         this.productCategoryRepository = productCategoryRepository;
         this.productNoticeRepository = productNoticeRepository;
+        this.productSearchGateway = productSearchGateway;
     }
 
     @Transactional(readOnly = true)
@@ -66,7 +71,12 @@ public class ProductService {
         if (normalizedKeyword.isEmpty()) {
             return List.of();
         }
-        return toSummaries(productRepository.findByDeletedFlagFalseAndSaleStatusAndNameContainingOrderByIdDesc(ON_SALE, normalizedKeyword));
+        return productSearchGateway.searchOnSaleProductIds(normalizedKeyword)
+            .map(this::loadProductsBySearchOrder)
+            .map(this::toSummaries)
+            .orElseGet(() -> toSummaries(
+                productRepository.findByDeletedFlagFalseAndSaleStatusAndNameContainingOrderByIdDesc(ON_SALE, normalizedKeyword)
+            ));
     }
 
     @Transactional(readOnly = true)
@@ -103,6 +113,7 @@ public class ProductService {
         Product saved = productRepository.save(product);
         List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
         ProductNotice notice = saveNotice(saved.getId(), request.noticeTitle(), request.noticeContent(), now);
+        productSearchGateway.indexProduct(saved);
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
     }
 
@@ -118,6 +129,7 @@ public class ProductService {
         productSkuRepository.deleteByProductId(saved.getId());
         List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
         ProductNotice notice = saveNotice(saved.getId(), request.noticeTitle(), request.noticeContent(), now);
+        productSearchGateway.indexProduct(saved);
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
     }
 
@@ -140,7 +152,22 @@ public class ProductService {
         Product saved = productRepository.save(product);
         List<ProductSku> skus = productSkuRepository.findByProductId(saved.getId());
         ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(saved.getId()).orElse(null);
+        productSearchGateway.indexProduct(saved);
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
+    }
+
+    private List<Product> loadProductsBySearchOrder(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Integer> rankMap = new HashMap<>();
+        for (int i = 0; i < ids.size(); i++) {
+            rankMap.put(ids.get(i), i);
+        }
+        return productRepository.findByIdIn(ids).stream()
+            .filter(product -> !Boolean.TRUE.equals(product.getDeletedFlag()) && ON_SALE.equals(product.getSaleStatus()))
+            .sorted(Comparator.comparingInt(product -> rankMap.getOrDefault(product.getId(), Integer.MAX_VALUE)))
+            .toList();
     }
 
     private void applyProductRequest(Product product, ProductUpsertRequest request, LocalDateTime now, boolean creating) {

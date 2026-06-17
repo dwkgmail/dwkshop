@@ -15,7 +15,7 @@ The first runnable split introduces an API Gateway and five service runtimes:
 | order-service | 18084 | `/api/orders/**`, `/admin/orders/**` | `backend-order` |
 | aftersale-service | 18085 | `/api/aftersales/**`, `/admin/aftersales/**` | `backend-aftersale` |
 
-Shared HTTP auth and web infrastructure lives in `backend-common`. Run backend service builds from the repository root when you want Maven to resolve all extracted modules together:
+Shared HTTP auth, web infrastructure, and utility formatting lives in `backend-common`. Run backend service builds from the repository root when you want Maven to resolve all extracted modules together:
 
 ```bash
 mvn test

@@ -35,7 +35,7 @@ import com.dwkshop.backend.order.dto.OrderItemResponse;
 import com.dwkshop.backend.order.dto.OrderResponse;
 import com.dwkshop.backend.order.dto.OrderSummaryResponse;
 import com.dwkshop.backend.order.dto.PointDeductionResponse;
-import com.dwkshop.backend.product.PriceFormatter;
+import com.dwkshop.backend.util.PriceFormatter;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;

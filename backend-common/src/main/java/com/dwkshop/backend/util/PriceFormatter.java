@@ -1,4 +1,4 @@
-package com.dwkshop.backend.product;
+package com.dwkshop.backend.util;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;

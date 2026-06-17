@@ -16,6 +16,7 @@ import com.dwkshop.backend.product.dto.ProductSkuResponse;
 import com.dwkshop.backend.product.dto.ProductSkuSnapshotResponse;
 import com.dwkshop.backend.product.dto.ProductSummaryResponse;
 import com.dwkshop.backend.product.dto.ProductUpsertRequest;
+import com.dwkshop.backend.util.PriceFormatter;
 import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
 import java.util.Comparator;

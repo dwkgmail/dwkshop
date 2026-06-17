@@ -11,7 +11,7 @@ import com.dwkshop.backend.domain.repository.AftersaleOrderRepository;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
-import com.dwkshop.backend.product.PriceFormatter;
+import com.dwkshop.backend.util.PriceFormatter;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;

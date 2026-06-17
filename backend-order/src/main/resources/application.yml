@@ -44,6 +44,8 @@ dwkshop:
   order:
     settlement-ttl-minutes: 30
   services:
+    cart:
+      base-url: ${DWKSHOP_CART_SERVICE_BASE_URL:http://localhost:18083}
     product:
       base-url: ${DWKSHOP_PRODUCT_SERVICE_BASE_URL:http://localhost:18082}
   mq:

@@ -121,9 +121,11 @@ services:
       SPRING_DATASOURCE_PASSWORD: dwkshop
       SPRING_DATA_REDIS_HOST: redis
       SPRING_RABBITMQ_HOST: rabbitmq
+      DWKSHOP_CART_SERVICE_BASE_URL: http://cart-service:18083
       DWKSHOP_PRODUCT_SERVICE_BASE_URL: http://product-service:18082
     depends_on:
       - auth-service
+      - cart-service
       - product-service
       - redis
       - rabbitmq

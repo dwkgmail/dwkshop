@@ -2,6 +2,7 @@ package com.dwkshop.backend.cart;
 
 import com.dwkshop.backend.cart.dto.AddCartItemRequest;
 import com.dwkshop.backend.cart.dto.CartItemResponse;
+import com.dwkshop.backend.cart.dto.CartItemSnapshotResponse;
 import com.dwkshop.backend.cart.dto.CartResponse;
 import com.dwkshop.backend.cart.dto.UpdateCartItemRequest;
 import com.dwkshop.backend.domain.entity.CartItem;
@@ -115,6 +116,30 @@ public class CartService {
         return listItems(userId);
     }
 
+    @Transactional(readOnly = true)
+    public List<CartItemSnapshotResponse> listItemSnapshots(Long userId, List<Long> itemIds) {
+        List<CartItem> items = cartItemRepository.findByUserIdOrderByIdDesc(userId);
+        if (itemIds != null && !itemIds.isEmpty()) {
+            items = items.stream()
+                .filter(item -> itemIds.contains(item.getId()))
+                .toList();
+        }
+        return items.stream()
+            .map(this::toSnapshot)
+            .toList();
+    }
+
+    @Transactional
+    public void deleteItemSnapshots(Long userId, List<Long> itemIds) {
+        if (itemIds == null || itemIds.isEmpty()) {
+            return;
+        }
+        List<CartItem> items = itemIds.stream()
+            .map(id -> findUserCartItem(userId, id))
+            .toList();
+        cartItemRepository.deleteAll(items);
+    }
+
     private void validateAddable(ProductSkuSnapshot sku, Integer quantity) {
         if (sku == null || Boolean.TRUE.equals(sku.deletedFlag())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Product does not exist");
@@ -180,6 +205,18 @@ public class CartService {
             state.canCheck(),
             amount,
             PriceFormatter.formatCents(amount)
+        );
+    }
+
+    private CartItemSnapshotResponse toSnapshot(CartItem item) {
+        return new CartItemSnapshotResponse(
+            item.getId(),
+            item.getUserId(),
+            item.getProductId(),
+            item.getSkuId(),
+            item.getQuantity(),
+            item.getCheckedFlag(),
+            item.getItemStatus()
         );
     }
 

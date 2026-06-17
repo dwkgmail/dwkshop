@@ -1,6 +1,5 @@
 package com.dwkshop.backend.order;
 
-import com.dwkshop.backend.domain.entity.CartItem;
 import com.dwkshop.backend.domain.entity.Coupon;
 import com.dwkshop.backend.domain.entity.CouponUser;
 import com.dwkshop.backend.domain.entity.TradeOrder;
@@ -8,7 +7,6 @@ import com.dwkshop.backend.domain.entity.TradeOrderAmount;
 import com.dwkshop.backend.domain.entity.TradeOrderItem;
 import com.dwkshop.backend.domain.entity.UserAddress;
 import com.dwkshop.backend.domain.entity.UserPointAccount;
-import com.dwkshop.backend.domain.repository.CartItemRepository;
 import com.dwkshop.backend.domain.repository.CouponRepository;
 import com.dwkshop.backend.domain.repository.CouponUserRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
@@ -60,7 +58,6 @@ public class OrderService {
     private static final String DELIVERY_IN_TRANSIT = "IN_TRANSIT";
     private static final String DELIVERY_DELIVERED = "DELIVERED";
 
-    private final CartItemRepository cartItemRepository;
     private final UserAddressRepository userAddressRepository;
     private final CouponUserRepository couponUserRepository;
     private final CouponRepository couponRepository;
@@ -69,12 +66,12 @@ public class OrderService {
     private final TradeOrderItemRepository tradeOrderItemRepository;
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
     private final SettlementSessionStore settlementSessionStore;
+    private final CartClient cartClient;
     private final ProductCatalogClient productCatalogClient;
     private final ApplicationEventPublisher eventPublisher;
     private final Duration settlementTtl;
 
     public OrderService(
-        CartItemRepository cartItemRepository,
         UserAddressRepository userAddressRepository,
         CouponUserRepository couponUserRepository,
         CouponRepository couponRepository,
@@ -83,11 +80,11 @@ public class OrderService {
         TradeOrderItemRepository tradeOrderItemRepository,
         TradeOrderAmountRepository tradeOrderAmountRepository,
         SettlementSessionStore settlementSessionStore,
+        CartClient cartClient,
         ProductCatalogClient productCatalogClient,
         ApplicationEventPublisher eventPublisher,
         @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
-        this.cartItemRepository = cartItemRepository;
         this.userAddressRepository = userAddressRepository;
         this.couponUserRepository = couponUserRepository;
         this.couponRepository = couponRepository;
@@ -96,6 +93,7 @@ public class OrderService {
         this.tradeOrderItemRepository = tradeOrderItemRepository;
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
         this.settlementSessionStore = settlementSessionStore;
+        this.cartClient = cartClient;
         this.productCatalogClient = productCatalogClient;
         this.eventPublisher = eventPublisher;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
@@ -275,17 +273,14 @@ public class OrderService {
 
     private List<SettlementItem> resolveItems(Long userId, String sourceType, ConfirmOrderRequest request) {
         if (CART.equals(sourceType)) {
-            // 购物车结算未指定条目时，默认结算当前用户购物车中的全部商品。
-            List<CartItem> cartItems = request.cartItemIds() == null || request.cartItemIds().isEmpty()
-                ? cartItemRepository.findByUserIdOrderByIdDesc(userId)
-                : request.cartItemIds().stream()
-                    .map(id -> cartItemRepository.findByIdAndUserId(id, userId)
-                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "购物车商品不存在")))
-                    .toList();
+            List<CartItemSnapshot> cartItems = cartClient.listItems(userId, request.cartItemIds());
             if (cartItems.isEmpty()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请选择要结算的商品");
             }
-            return cartItems.stream().map(item -> toSettlementItem(item, item.getSkuId(), item.getQuantity())).toList();
+            if (request.cartItemIds() != null && !request.cartItemIds().isEmpty() && cartItems.size() != request.cartItemIds().size()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "购物车商品不存在");
+            }
+            return cartItems.stream().map(item -> toSettlementItem(item, item.skuId(), item.quantity())).toList();
         }
         int quantity = request.quantity() == null ? 1 : request.quantity();
         if (request.skuId() == null || quantity <= 0) {
@@ -294,12 +289,13 @@ public class OrderService {
         return List.of(toSettlementItem(null, request.skuId(), quantity));
     }
 
-    private SettlementItem toSettlementItem(CartItem cartItem, Long skuId, int quantity) {
+
+    private SettlementItem toSettlementItem(CartItemSnapshot cartItem, Long skuId, int quantity) {
         ProductSkuSnapshot sku = productCatalogClient.getSkuSnapshot(skuId);
         if (sku == null || Boolean.TRUE.equals(sku.deletedFlag())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品不存在");
         }
-        return new SettlementItem(cartItem == null ? null : cartItem.getId(), sku, quantity);
+        return new SettlementItem(cartItem == null ? null : cartItem.id(), sku, quantity);
     }
 
     private void validateItems(List<SettlementItem> items) {
@@ -458,7 +454,7 @@ public class OrderService {
                 .map(SettlementItem::cartItemId)
                 .filter(id -> id != null)
                 .toList();
-            cartItemRepository.deleteAllById(cartItemIds);
+            cartClient.deleteItems(userId, cartItemIds);
         }
 
         return toOrderResponse(savedOrder);

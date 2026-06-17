@@ -5,15 +5,11 @@ import com.dwkshop.backend.domain.entity.CouponUser;
 import com.dwkshop.backend.domain.entity.TradeOrder;
 import com.dwkshop.backend.domain.entity.TradeOrderAmount;
 import com.dwkshop.backend.domain.entity.TradeOrderItem;
-import com.dwkshop.backend.domain.entity.UserAddress;
-import com.dwkshop.backend.domain.entity.UserPointAccount;
 import com.dwkshop.backend.domain.repository.CouponRepository;
 import com.dwkshop.backend.domain.repository.CouponUserRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
-import com.dwkshop.backend.domain.repository.UserAddressRepository;
-import com.dwkshop.backend.domain.repository.UserPointAccountRepository;
 import com.dwkshop.backend.order.dto.AdminShipOrderRequest;
 import com.dwkshop.backend.order.dto.AdminUpdateDeliveryStatusRequest;
 import com.dwkshop.backend.order.dto.ConfirmCouponResponse;
@@ -58,42 +54,39 @@ public class OrderService {
     private static final String DELIVERY_IN_TRANSIT = "IN_TRANSIT";
     private static final String DELIVERY_DELIVERED = "DELIVERED";
 
-    private final UserAddressRepository userAddressRepository;
     private final CouponUserRepository couponUserRepository;
     private final CouponRepository couponRepository;
-    private final UserPointAccountRepository userPointAccountRepository;
     private final TradeOrderRepository tradeOrderRepository;
     private final TradeOrderItemRepository tradeOrderItemRepository;
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
     private final SettlementSessionStore settlementSessionStore;
     private final CartClient cartClient;
+    private final MemberClient memberClient;
     private final ProductCatalogClient productCatalogClient;
     private final ApplicationEventPublisher eventPublisher;
     private final Duration settlementTtl;
 
     public OrderService(
-        UserAddressRepository userAddressRepository,
         CouponUserRepository couponUserRepository,
         CouponRepository couponRepository,
-        UserPointAccountRepository userPointAccountRepository,
         TradeOrderRepository tradeOrderRepository,
         TradeOrderItemRepository tradeOrderItemRepository,
         TradeOrderAmountRepository tradeOrderAmountRepository,
         SettlementSessionStore settlementSessionStore,
         CartClient cartClient,
+        MemberClient memberClient,
         ProductCatalogClient productCatalogClient,
         ApplicationEventPublisher eventPublisher,
         @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
-        this.userAddressRepository = userAddressRepository;
         this.couponUserRepository = couponUserRepository;
         this.couponRepository = couponRepository;
-        this.userPointAccountRepository = userPointAccountRepository;
         this.tradeOrderRepository = tradeOrderRepository;
         this.tradeOrderItemRepository = tradeOrderItemRepository;
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
         this.settlementSessionStore = settlementSessionStore;
         this.cartClient = cartClient;
+        this.memberClient = memberClient;
         this.productCatalogClient = productCatalogClient;
         this.eventPublisher = eventPublisher;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
@@ -259,7 +252,7 @@ public class OrderService {
         // 先把购物车/立即购买两种入口统一整理成结算项，后续金额逻辑都基于它。
         List<SettlementItem> items = resolveItems(userId, sourceType, request);
         validateItems(items);
-        UserAddress address = resolveAddress(userId, request.addressId());
+        MemberAddress address = resolveAddress(userId, request.addressId());
         int productAmount = items.stream().mapToInt(SettlementItem::totalAmount).sum();
         int productDiscountAmount = 0;
         int freightAmount = calculateFreight(items);
@@ -319,14 +312,8 @@ public class OrderService {
         }
     }
 
-    private UserAddress resolveAddress(Long userId, Long addressId) {
-        if (addressId != null) {
-            return userAddressRepository.findByIdAndUserId(addressId, userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "收货地址不存在"));
-        }
-        return userAddressRepository.findFirstByUserIdAndDefaultFlagTrue(userId)
-            .or(() -> userAddressRepository.findFirstByUserIdOrderByIdAsc(userId))
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "请先添加收货地址"));
+    private MemberAddress resolveAddress(Long userId, Long addressId) {
+        return memberClient.resolveAddress(userId, addressId);
     }
 
     private int calculateFreight(List<SettlementItem> items) {
@@ -372,8 +359,8 @@ public class OrderService {
 
     private PointSelection selectPoints(Long userId, Boolean usePoints, List<SettlementItem> items, int remainingAmount) {
         boolean visible = items.stream().anyMatch(item -> Boolean.TRUE.equals(item.sku().supportPointDeduction()));
-        UserPointAccount account = userPointAccountRepository.findByUserId(userId).orElse(null);
-        int availablePoints = account == null ? 0 : account.getAvailablePoints();
+        MemberPointAccount account = memberClient.getPointAccount(userId);
+        int availablePoints = account == null || account.availablePoints() == null ? 0 : account.availablePoints();
         boolean selected = visible && Boolean.TRUE.equals(usePoints) && availablePoints > 0;
         // 积分按固定比例抵扣，但最低只抵到 0，不会把应付金额抵成负数。
         int deduction = selected ? Math.min(availablePoints / POINT_EXCHANGE_RATE, Math.max(remainingAmount, 0)) : 0;
@@ -397,8 +384,8 @@ public class OrderService {
         order.setPointAmount(calculation.amount().pointDiscountAmount());
         order.setFreightAmount(calculation.amount().freightAmount());
         order.setPayAmount(calculation.amount().payAmount());
-        order.setReceiverName(calculation.address().getReceiverName());
-        order.setReceiverMobile(calculation.address().getReceiverMobile());
+        order.setReceiverName(calculation.address().receiverName());
+        order.setReceiverMobile(calculation.address().receiverMobile());
         order.setReceiverAddress(addressText(calculation.address()));
         order.setRemark(createRemark == null ? request.remark() : createRemark);
         order.setPayExpireTime(now.plusMinutes(30));
@@ -563,16 +550,16 @@ public class OrderService {
         );
     }
 
-    private OrderAddressResponse toAddress(UserAddress address) {
+    private OrderAddressResponse toAddress(MemberAddress address) {
         return new OrderAddressResponse(
-            address.getId(),
-            address.getReceiverName(),
-            address.getReceiverMobile(),
-            address.getProvince(),
-            address.getCity(),
-            address.getDistrict(),
-            address.getDetailAddress(),
-            address.getDefaultFlag()
+            address.id(),
+            address.receiverName(),
+            address.receiverMobile(),
+            address.province(),
+            address.city(),
+            address.district(),
+            address.detailAddress(),
+            address.defaultFlag()
         );
     }
 
@@ -609,8 +596,8 @@ public class OrderService {
         );
     }
 
-    private String addressText(UserAddress address) {
-        return address.getProvince() + address.getCity() + address.getDistrict() + address.getDetailAddress();
+    private String addressText(MemberAddress address) {
+        return address.province() + address.city() + address.district() + address.detailAddress();
     }
 
     private String normalizeSourceType(String sourceType) {
@@ -645,7 +632,7 @@ public class OrderService {
 
     private record SettlementCalculation(
         String sourceType,
-        UserAddress address,
+        MemberAddress address,
         List<SettlementItem> items,
         CouponUser selectedCouponUser,
         List<ConfirmCouponResponse> availableCoupons,

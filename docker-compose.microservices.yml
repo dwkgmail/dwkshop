@@ -107,6 +107,21 @@ services:
       - auth-service
       - product-service
 
+  member-service:
+    build:
+      context: .
+      dockerfile: backend-member/Dockerfile
+    container_name: dwkshop-member-service
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 18086
+      SPRING_FLYWAY_ENABLED: "false"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: dwkshop
+      SPRING_DATASOURCE_PASSWORD: dwkshop
+    depends_on:
+      - auth-service
+
   order-service:
     build:
       context: .
@@ -122,10 +137,12 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_RABBITMQ_HOST: rabbitmq
       DWKSHOP_CART_SERVICE_BASE_URL: http://cart-service:18083
+      DWKSHOP_MEMBER_SERVICE_BASE_URL: http://member-service:18086
       DWKSHOP_PRODUCT_SERVICE_BASE_URL: http://product-service:18082
     depends_on:
       - auth-service
       - cart-service
+      - member-service
       - product-service
       - redis
       - rabbitmq

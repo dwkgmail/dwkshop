@@ -3,9 +3,6 @@ package com.dwkshop.backend.order;
 import com.dwkshop.backend.domain.entity.CartItem;
 import com.dwkshop.backend.domain.entity.Coupon;
 import com.dwkshop.backend.domain.entity.CouponUser;
-import com.dwkshop.backend.domain.entity.Product;
-import com.dwkshop.backend.domain.entity.ProductNotice;
-import com.dwkshop.backend.domain.entity.ProductSku;
 import com.dwkshop.backend.domain.entity.TradeOrder;
 import com.dwkshop.backend.domain.entity.TradeOrderAmount;
 import com.dwkshop.backend.domain.entity.TradeOrderItem;
@@ -14,9 +11,6 @@ import com.dwkshop.backend.domain.entity.UserPointAccount;
 import com.dwkshop.backend.domain.repository.CartItemRepository;
 import com.dwkshop.backend.domain.repository.CouponRepository;
 import com.dwkshop.backend.domain.repository.CouponUserRepository;
-import com.dwkshop.backend.domain.repository.ProductNoticeRepository;
-import com.dwkshop.backend.domain.repository.ProductRepository;
-import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
@@ -67,9 +61,6 @@ public class OrderService {
     private static final String DELIVERY_DELIVERED = "DELIVERED";
 
     private final CartItemRepository cartItemRepository;
-    private final ProductRepository productRepository;
-    private final ProductSkuRepository productSkuRepository;
-    private final ProductNoticeRepository productNoticeRepository;
     private final UserAddressRepository userAddressRepository;
     private final CouponUserRepository couponUserRepository;
     private final CouponRepository couponRepository;
@@ -78,14 +69,12 @@ public class OrderService {
     private final TradeOrderItemRepository tradeOrderItemRepository;
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
     private final SettlementSessionStore settlementSessionStore;
+    private final ProductCatalogClient productCatalogClient;
     private final ApplicationEventPublisher eventPublisher;
     private final Duration settlementTtl;
 
     public OrderService(
         CartItemRepository cartItemRepository,
-        ProductRepository productRepository,
-        ProductSkuRepository productSkuRepository,
-        ProductNoticeRepository productNoticeRepository,
         UserAddressRepository userAddressRepository,
         CouponUserRepository couponUserRepository,
         CouponRepository couponRepository,
@@ -94,13 +83,11 @@ public class OrderService {
         TradeOrderItemRepository tradeOrderItemRepository,
         TradeOrderAmountRepository tradeOrderAmountRepository,
         SettlementSessionStore settlementSessionStore,
+        ProductCatalogClient productCatalogClient,
         ApplicationEventPublisher eventPublisher,
         @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
         this.cartItemRepository = cartItemRepository;
-        this.productRepository = productRepository;
-        this.productSkuRepository = productSkuRepository;
-        this.productNoticeRepository = productNoticeRepository;
         this.userAddressRepository = userAddressRepository;
         this.couponUserRepository = couponUserRepository;
         this.couponRepository = couponRepository;
@@ -109,6 +96,7 @@ public class OrderService {
         this.tradeOrderItemRepository = tradeOrderItemRepository;
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
         this.settlementSessionStore = settlementSessionStore;
+        this.productCatalogClient = productCatalogClient;
         this.eventPublisher = eventPublisher;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
     }
@@ -307,30 +295,28 @@ public class OrderService {
     }
 
     private SettlementItem toSettlementItem(CartItem cartItem, Long skuId, int quantity) {
-        ProductSku sku = productSkuRepository.findById(skuId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格已失效"));
-        Product product = productRepository.findById(sku.getProductId())
-            .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品不存在"));
-        ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(product.getId()).orElse(null);
-        return new SettlementItem(cartItem == null ? null : cartItem.getId(), product, sku, notice, quantity);
+        ProductSkuSnapshot sku = productCatalogClient.getSkuSnapshot(skuId);
+        if (sku == null || Boolean.TRUE.equals(sku.deletedFlag())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品不存在");
+        }
+        return new SettlementItem(cartItem == null ? null : cartItem.getId(), sku, quantity);
     }
 
     private void validateItems(List<SettlementItem> items) {
         for (SettlementItem item : items) {
             // 结算前统一检查商品状态、SKU 状态和库存，避免脏数据进入下单流程。
-            if (!ON_SALE.equals(item.product().getSaleStatus())) {
+            if (!ON_SALE.equals(item.sku().saleStatus())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品已下架，请重新确认");
             }
-            if (!ENABLED.equals(item.sku().getSkuStatus())) {
+            if (!ENABLED.equals(item.sku().skuStatus())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
             }
-            if (item.sku().getStock() < item.quantity()) {
+            if (item.sku().stock() < item.quantity()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "库存不足，请修改购买数量");
             }
         }
-        boolean hasNormalSingleBuy = items.stream().anyMatch(item -> Boolean.TRUE.equals(item.product().getAllowSingleBuy()));
-        boolean hasOnlyCannotSingleBuy = items.stream().allMatch(item -> !Boolean.TRUE.equals(item.product().getAllowSingleBuy()));
+        boolean hasNormalSingleBuy = items.stream().anyMatch(item -> Boolean.TRUE.equals(item.sku().allowSingleBuy()));
+        boolean hasOnlyCannotSingleBuy = items.stream().allMatch(item -> !Boolean.TRUE.equals(item.sku().allowSingleBuy()));
         // 不可单独购买的商品不能脱离搭售场景单独下单。
         if (hasOnlyCannotSingleBuy || (!hasNormalSingleBuy && items.size() > 0)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品不可单独购买");
@@ -348,7 +334,7 @@ public class OrderService {
     }
 
     private int calculateFreight(List<SettlementItem> items) {
-        boolean hasColdChain = items.stream().anyMatch(item -> "COLD_CHAIN".equals(item.product().getDeliveryType()));
+        boolean hasColdChain = items.stream().anyMatch(item -> "COLD_CHAIN".equals(item.sku().deliveryType()));
         return hasColdChain ? COLD_CHAIN_FREIGHT : NORMAL_FREIGHT;
     }
 
@@ -389,7 +375,7 @@ public class OrderService {
     }
 
     private PointSelection selectPoints(Long userId, Boolean usePoints, List<SettlementItem> items, int remainingAmount) {
-        boolean visible = items.stream().anyMatch(item -> Boolean.TRUE.equals(item.product().getSupportPointDeduction()));
+        boolean visible = items.stream().anyMatch(item -> Boolean.TRUE.equals(item.sku().supportPointDeduction()));
         UserPointAccount account = userPointAccountRepository.findByUserId(userId).orElse(null);
         int availablePoints = account == null ? 0 : account.getAvailablePoints();
         boolean selected = visible && Boolean.TRUE.equals(usePoints) && availablePoints > 0;
@@ -425,28 +411,16 @@ public class OrderService {
         TradeOrder savedOrder = tradeOrderRepository.save(order);
 
         for (SettlementItem item : calculation.items()) {
-            // 通过行级锁再次扣减库存并增加锁定库存，避免并发下单超卖。
-            ProductSku sku = productSkuRepository.findByIdForUpdate(item.sku().getId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格已失效"));
-            if (!ENABLED.equals(sku.getSkuStatus())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
-            }
-            if (sku.getStock() < item.quantity()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "库存不足，请修改购买数量");
-            }
-            sku.setStock(sku.getStock() - item.quantity());
-            sku.setLockedStock(sku.getLockedStock() + item.quantity());
-            sku.setUpdatedAt(now);
-            productSkuRepository.save(sku);
+            LockSkuStockResponse lockedSku = productCatalogClient.lockSkuStock(item.sku().skuId(), item.quantity());
 
             TradeOrderItem orderItem = new TradeOrderItem();
             orderItem.setOrderId(savedOrder.getId());
-            orderItem.setProductId(item.product().getId());
-            orderItem.setSkuId(sku.getId());
-            orderItem.setProductName(item.product().getName());
-            orderItem.setSkuName(sku.getSkuName());
-            orderItem.setProductImageUrl(item.product().getMainImageUrl());
-            orderItem.setSalePrice(sku.getSalePrice());
+            orderItem.setProductId(item.sku().productId());
+            orderItem.setSkuId(lockedSku.skuId());
+            orderItem.setProductName(item.sku().productName());
+            orderItem.setSkuName(lockedSku.skuName());
+            orderItem.setProductImageUrl(item.sku().productImageUrl());
+            orderItem.setSalePrice(lockedSku.salePrice());
             orderItem.setQuantity(item.quantity());
             orderItem.setTotalAmount(item.totalAmount());
             orderItem.setDiscountAmount(0);
@@ -513,23 +487,22 @@ public class OrderService {
     }
 
     private ConfirmOrderItemResponse toConfirmItem(SettlementItem item) {
-        ProductNotice notice = item.notice();
         return new ConfirmOrderItemResponse(
             item.cartItemId(),
-            item.product().getId(),
-            item.sku().getId(),
-            item.product().getName(),
-            item.sku().getSkuName(),
-            item.product().getMainImageUrl(),
-            item.sku().getSalePrice(),
-            PriceFormatter.formatCents(item.sku().getSalePrice()),
+            item.sku().productId(),
+            item.sku().skuId(),
+            item.sku().productName(),
+            item.sku().skuName(),
+            item.sku().productImageUrl(),
+            item.sku().salePrice(),
+            PriceFormatter.formatCents(item.sku().salePrice()),
             item.quantity(),
             item.totalAmount(),
             PriceFormatter.formatCents(item.totalAmount()),
-            item.product().getAllowSingleBuy(),
-            item.product().getSupportPointDeduction(),
-            notice == null ? null : notice.getNoticeTitle(),
-            notice == null ? null : notice.getNoticeContent()
+            item.sku().allowSingleBuy(),
+            item.sku().supportPointDeduction(),
+            item.sku().noticeTitle(),
+            item.sku().noticeContent()
         );
     }
 
@@ -668,9 +641,9 @@ public class OrderService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private record SettlementItem(Long cartItemId, Product product, ProductSku sku, ProductNotice notice, int quantity) {
+    private record SettlementItem(Long cartItemId, ProductSkuSnapshot sku, int quantity) {
         int totalAmount() {
-            return sku.getSalePrice() * quantity;
+            return sku.salePrice() * quantity;
         }
     }
 

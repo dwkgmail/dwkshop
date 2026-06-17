@@ -49,7 +49,7 @@ The frontend can continue to call `http://localhost:8080` because the gateway ke
 1. Keep gateway routes stable and add service-level health checks. Basic auth runtime extraction is complete in `backend-auth`.
 2. Extract shared DTOs and error contracts into a small common module. Shared auth/web infrastructure is now in `backend-common`.
 3. Move product controllers, services, repositories, entities, migrations, and search integration into a real product service. Basic runtime extraction is complete in `backend-product`; table-specific migrations are currently centralized in `backend-migrator` until table ownership is split.
-4. Replace cart and order direct JPA reads of product tables with product-service APIs or product snapshot events. Cart now uses the product service SKU snapshot API.
+4. Replace cart and order direct JPA access to product tables with product-service APIs or product snapshot events. Cart now uses the product service SKU snapshot API; order settlement reads product and notice data from that API; order stock locking now uses a product-service internal stock command.
 5. Move cart ownership, then order ownership, then aftersale ownership. Basic cart runtime extraction is complete in `backend-cart`; basic order runtime extraction is complete in `backend-order`; basic aftersale runtime extraction is complete in `backend-aftersale`.
 6. Split the single database into per-service schemas after cross-service reads are removed.
 7. Turn order-created and stock-related flows into RabbitMQ integration events with idempotent consumers.

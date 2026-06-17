@@ -10,6 +10,7 @@ import com.dwkshop.backend.domain.repository.ProductRepository;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.product.dto.AdminProductResponse;
 import com.dwkshop.backend.product.dto.CategoryResponse;
+import com.dwkshop.backend.product.dto.LockSkuStockResponse;
 import com.dwkshop.backend.product.dto.ProductDetailResponse;
 import com.dwkshop.backend.product.dto.ProductSkuRequest;
 import com.dwkshop.backend.product.dto.ProductSkuResponse;
@@ -106,21 +107,49 @@ public class ProductService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "SKU does not exist"));
         Product product = productRepository.findById(sku.getProductId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Product does not exist"));
+        ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(product.getId()).orElse(null);
         return new ProductSkuSnapshotResponse(
             product.getId(),
             sku.getId(),
             product.getName(),
             product.getMainImageUrl(),
             product.getSaleStatus(),
+            product.getDeliveryType(),
             product.getDeletedFlag(),
             product.getAllowCart(),
             product.getAllowSingleBuy(),
             product.getSupportPointDeduction(),
+            notice == null ? null : notice.getNoticeTitle(),
+            notice == null ? null : notice.getNoticeContent(),
             sku.getSkuName(),
             sku.getSpecJson(),
             sku.getSalePrice(),
             sku.getStock(),
             sku.getSkuStatus()
+        );
+    }
+
+    @Transactional
+    public LockSkuStockResponse lockSkuStock(Long skuId, int quantity) {
+        ProductSku sku = productSkuRepository.findByIdForUpdate(skuId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格已失效"));
+        if (!ENABLED.equals(sku.getSkuStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
+        }
+        if (sku.getStock() < quantity) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "库存不足，请修改购买数量");
+        }
+        sku.setStock(sku.getStock() - quantity);
+        sku.setLockedStock(sku.getLockedStock() + quantity);
+        sku.setUpdatedAt(LocalDateTime.now());
+        ProductSku saved = productSkuRepository.save(sku);
+        return new LockSkuStockResponse(
+            saved.getId(),
+            saved.getSkuName(),
+            saved.getSalePrice(),
+            saved.getStock(),
+            saved.getLockedStock(),
+            saved.getSkuStatus()
         );
     }
 

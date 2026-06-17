@@ -1,4 +1,4 @@
-package com.dwkshop.backend.cart;
+package com.dwkshop.backend.order;
 
 public record ProductSkuSnapshot(
     Long productId,

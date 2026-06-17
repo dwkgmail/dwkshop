@@ -10,10 +10,10 @@ The first runnable split introduces an API Gateway and five service runtimes:
 | --- | ---: | --- | --- |
 | gateway | 8080 | all public traffic | Spring Cloud Gateway |
 | auth-service | 18081 | `/api/auth/**`, `/admin/auth/**`, `/api/health` | backend image |
-| product-service | 18082 | `/api/products/**`, `/api/categories/**`, `/api/search/products`, `/admin/products/**` | backend image |
-| cart-service | 18083 | `/api/cart/**` | backend image |
-| order-service | 18084 | `/api/orders/**`, `/admin/orders/**` | backend image |
-| aftersale-service | 18085 | `/api/aftersales/**`, `/admin/aftersales/**` | backend image |
+| product-service | 18082 | `/api/products/**`, `/api/categories/**`, `/api/search/products`, `/admin/products/**` | `backend-product` |
+| cart-service | 18083 | `/api/cart/**` | `backend-cart` |
+| order-service | 18084 | `/api/orders/**`, `/admin/orders/**` | `backend-order` |
+| aftersale-service | 18085 | `/api/aftersales/**`, `/admin/aftersales/**` | `backend-aftersale` |
 
 The services still share the existing backend codebase and database. This is intentional for the first step: the current order, cart, product, coupon, point, and aftersale flows share JPA entities and database transactions. Routing traffic through service names first lets frontend and deployment boundaries stabilize before data ownership is split.
 
@@ -41,9 +41,9 @@ The frontend can continue to call `http://localhost:8080` because the gateway ke
 
 1. Keep gateway routes stable and add service-level health checks.
 2. Extract shared DTOs and error contracts into a small `common-api` module.
-3. Move product controllers, services, repositories, entities, migrations, and search integration into a real product service.
-4. Replace cart and order direct JPA reads of product tables with product-service APIs or product snapshot events.
-5. Move cart ownership, then order ownership, then aftersale ownership.
+3. Move product controllers, services, repositories, entities, migrations, and search integration into a real product service. Basic runtime extraction is complete in `backend-product`; table-specific migrations are still owned by the monolith migration set for now.
+4. Replace cart and order direct JPA reads of product tables with product-service APIs or product snapshot events. Cart now uses the product service SKU snapshot API.
+5. Move cart ownership, then order ownership, then aftersale ownership. Basic cart runtime extraction is complete in `backend-cart`; basic order runtime extraction is complete in `backend-order`; basic aftersale runtime extraction is complete in `backend-aftersale`.
 6. Split the single database into per-service schemas after cross-service reads are removed.
 7. Turn order-created and stock-related flows into RabbitMQ integration events with idempotent consumers.
 

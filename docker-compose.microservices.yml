@@ -58,7 +58,7 @@ services:
 
   product-service:
     build:
-      context: ./backend
+      context: ./backend-product
     container_name: dwkshop-product-service
     restart: unless-stopped
     environment:
@@ -67,8 +67,6 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
       DWKSHOP_ES_URIS: http://elasticsearch:9200
     depends_on:
@@ -76,7 +74,7 @@ services:
 
   cart-service:
     build:
-      context: ./backend
+      context: ./backend-cart
     container_name: dwkshop-cart-service
     restart: unless-stopped
     environment:
@@ -85,16 +83,14 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_RABBITMQ_HOST: rabbitmq
-      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
-      DWKSHOP_ES_URIS: http://elasticsearch:9200
+      DWKSHOP_PRODUCT_SERVICE_BASE_URL: http://product-service:18082
     depends_on:
       - auth-service
+      - product-service
 
   order-service:
     build:
-      context: ./backend
+      context: ./backend-order
     container_name: dwkshop-order-service
     restart: unless-stopped
     environment:
@@ -105,14 +101,14 @@ services:
       SPRING_DATASOURCE_PASSWORD: dwkshop
       SPRING_DATA_REDIS_HOST: redis
       SPRING_RABBITMQ_HOST: rabbitmq
-      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
-      DWKSHOP_ES_URIS: http://elasticsearch:9200
     depends_on:
       - auth-service
+      - redis
+      - rabbitmq
 
   aftersale-service:
     build:
-      context: ./backend
+      context: ./backend-aftersale
     container_name: dwkshop-aftersale-service
     restart: unless-stopped
     environment:
@@ -121,12 +117,10 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_RABBITMQ_HOST: rabbitmq
-      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
-      DWKSHOP_ES_URIS: http://elasticsearch:9200
     depends_on:
       - auth-service
+      - order-service
+      - product-service
 
 volumes:
   mysql_data:

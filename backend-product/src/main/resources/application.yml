@@ -1,0 +1,41 @@
+server:
+  port: 18082
+
+spring:
+  application:
+    name: dwkshop-product-service
+  datasource:
+    url: jdbc:mysql://localhost:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: dwkshop
+    password: dwkshop
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    elasticsearch:
+      repositories:
+        enabled: ${DWKSHOP_ES_ENABLED:true}
+  elasticsearch:
+    uris: ${DWKSHOP_ES_URIS:http://localhost:9200}
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+dwkshop:
+  auth:
+    secret: ${DWKSHOP_AUTH_SECRET:dwkshop-local-dev-secret-change-me}
+    ttl-seconds: 86400
+  search:
+    elasticsearch:
+      enabled: ${DWKSHOP_ES_ENABLED:true}
+      index-name: ${DWKSHOP_ES_PRODUCT_INDEX:dwkshop_products}

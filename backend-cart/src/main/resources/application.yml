@@ -1,0 +1,34 @@
+server:
+  port: 18083
+
+spring:
+  application:
+    name: dwkshop-cart-service
+  datasource:
+    url: jdbc:mysql://localhost:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: dwkshop
+    password: dwkshop
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+dwkshop:
+  auth:
+    secret: ${DWKSHOP_AUTH_SECRET:dwkshop-local-dev-secret-change-me}
+    ttl-seconds: 86400
+  services:
+    product:
+      base-url: ${DWKSHOP_PRODUCT_SERVICE_BASE_URL:http://localhost:18082}

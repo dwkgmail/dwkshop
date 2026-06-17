@@ -38,7 +38,7 @@ services:
 
   auth-service:
     build:
-      context: ./backend
+      context: ./backend-auth
     container_name: dwkshop-auth-service
     restart: unless-stopped
     environment:
@@ -46,15 +46,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_RABBITMQ_HOST: rabbitmq
-      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
-      DWKSHOP_ES_URIS: http://elasticsearch:9200
     depends_on:
       - mysql
-      - redis
-      - rabbitmq
-      - elasticsearch
 
   product-service:
     build:
@@ -71,6 +64,7 @@ services:
       DWKSHOP_ES_URIS: http://elasticsearch:9200
     depends_on:
       - auth-service
+      - elasticsearch
 
   cart-service:
     build:

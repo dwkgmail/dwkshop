@@ -1,12 +1,8 @@
 package com.dwkshop.backend.order;
 
-import com.dwkshop.backend.domain.entity.Coupon;
-import com.dwkshop.backend.domain.entity.CouponUser;
 import com.dwkshop.backend.domain.entity.TradeOrder;
 import com.dwkshop.backend.domain.entity.TradeOrderAmount;
 import com.dwkshop.backend.domain.entity.TradeOrderItem;
-import com.dwkshop.backend.domain.repository.CouponRepository;
-import com.dwkshop.backend.domain.repository.CouponUserRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
@@ -27,11 +23,8 @@ import com.dwkshop.backend.util.PriceFormatter;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -54,39 +47,36 @@ public class OrderService {
     private static final String DELIVERY_IN_TRANSIT = "IN_TRANSIT";
     private static final String DELIVERY_DELIVERED = "DELIVERED";
 
-    private final CouponUserRepository couponUserRepository;
-    private final CouponRepository couponRepository;
     private final TradeOrderRepository tradeOrderRepository;
     private final TradeOrderItemRepository tradeOrderItemRepository;
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
     private final SettlementSessionStore settlementSessionStore;
     private final CartClient cartClient;
     private final MemberClient memberClient;
+    private final MarketingClient marketingClient;
     private final ProductCatalogClient productCatalogClient;
     private final ApplicationEventPublisher eventPublisher;
     private final Duration settlementTtl;
 
     public OrderService(
-        CouponUserRepository couponUserRepository,
-        CouponRepository couponRepository,
         TradeOrderRepository tradeOrderRepository,
         TradeOrderItemRepository tradeOrderItemRepository,
         TradeOrderAmountRepository tradeOrderAmountRepository,
         SettlementSessionStore settlementSessionStore,
         CartClient cartClient,
         MemberClient memberClient,
+        MarketingClient marketingClient,
         ProductCatalogClient productCatalogClient,
         ApplicationEventPublisher eventPublisher,
         @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
-        this.couponUserRepository = couponUserRepository;
-        this.couponRepository = couponRepository;
         this.tradeOrderRepository = tradeOrderRepository;
         this.tradeOrderItemRepository = tradeOrderItemRepository;
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
         this.settlementSessionStore = settlementSessionStore;
         this.cartClient = cartClient;
         this.memberClient = memberClient;
+        this.marketingClient = marketingClient;
         this.productCatalogClient = productCatalogClient;
         this.eventPublisher = eventPublisher;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
@@ -261,7 +251,7 @@ public class OrderService {
         int payAmount = productAmount - productDiscountAmount - couponSelection.discountAmount() - pointSelection.deductionAmount() + freightAmount;
         payAmount = Math.max(payAmount, 0);
         OrderAmountResponse amount = toAmount(productAmount, productDiscountAmount, couponSelection.discountAmount(), pointSelection.deductionAmount(), freightAmount, 0, payAmount);
-        return new SettlementCalculation(sourceType, address, items, couponSelection.selectedCouponUser(), couponSelection.availableCoupons(), pointSelection, amount);
+        return new SettlementCalculation(sourceType, address, items, couponSelection.selectedUserCouponId(), couponSelection.availableCoupons(), pointSelection, amount);
     }
 
     private List<SettlementItem> resolveItems(Long userId, String sourceType, ConfirmOrderRequest request) {
@@ -322,39 +312,14 @@ public class OrderService {
     }
 
     private CouponSelection selectCoupon(Long userId, Long requestedCouponUserId, int productAmount) {
-        List<CouponUser> userCoupons = couponUserRepository.findByUserIdAndUserCouponStatus(userId, "UNUSED");
-        Map<Long, Coupon> couponMap = couponRepository.findAllById(userCoupons.stream().map(CouponUser::getCouponId).toList()).stream()
-            .collect(Collectors.toMap(Coupon::getId, coupon -> coupon));
-        // 仅保留状态有效、满足门槛且处于可用时间窗内的优惠券。
-        List<CouponCandidate> candidates = userCoupons.stream()
-            .map(userCoupon -> new CouponCandidate(userCoupon, couponMap.get(userCoupon.getCouponId())))
-            .filter(candidate -> candidate.coupon() != null)
-            .filter(candidate -> "ENABLED".equals(candidate.coupon().getCouponStatus()))
-            .filter(candidate -> productAmount >= candidate.coupon().getThresholdAmount())
-            .filter(candidate -> {
-                LocalDateTime now = LocalDateTime.now();
-                return !now.isBefore(candidate.coupon().getUseStartTime()) && !now.isAfter(candidate.coupon().getUseEndTime());
-            })
-            .toList();
-        CouponCandidate selected;
-        if (requestedCouponUserId != null) {
-            selected = candidates.stream()
-                .filter(candidate -> candidate.userCoupon().getId().equals(requestedCouponUserId))
-                .findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "优惠券不可用"));
-        } else {
-            // 用户未指定时自动选最优券：先比优惠金额，再优先快过期的券。
-            selected = candidates.stream()
-                .max(Comparator
-                    .comparing((CouponCandidate candidate) -> candidate.coupon().getDiscountAmount())
-                    .thenComparing(candidate -> candidate.coupon().getUseEndTime(), Comparator.reverseOrder()))
-                .orElse(null);
+        MarketingCouponSelection selection = marketingClient.selectCoupon(userId, requestedCouponUserId, productAmount);
+        if (selection == null) {
+            return new CouponSelection(null, List.of(), 0);
         }
-        CouponCandidate finalSelected = selected;
-        List<ConfirmCouponResponse> responses = candidates.stream()
-            .map(candidate -> toCouponResponse(candidate.userCoupon(), candidate.coupon(), finalSelected != null && finalSelected.userCoupon().getId().equals(candidate.userCoupon().getId())))
-            .toList();
-        return new CouponSelection(selected == null ? null : selected.userCoupon(), responses, selected == null ? 0 : selected.coupon().getDiscountAmount());
+        List<ConfirmCouponResponse> responses = selection.availableCoupons() == null
+            ? List.of()
+            : selection.availableCoupons().stream().map(this::toCouponResponse).toList();
+        return new CouponSelection(selection.selectedUserCouponId(), responses, selection.discountAmount() == null ? 0 : selection.discountAmount());
     }
 
     private PointSelection selectPoints(Long userId, Boolean usePoints, List<SettlementItem> items, int remainingAmount) {
@@ -426,13 +391,8 @@ public class OrderService {
         amount.setCreatedAt(now);
         tradeOrderAmountRepository.save(amount);
 
-        if (calculation.selectedCouponUser() != null) {
-            // 优惠券在订单真正创建成功后再核销，避免只在结算页就占用。
-            CouponUser couponUser = calculation.selectedCouponUser();
-            couponUser.setUserCouponStatus("USED");
-            couponUser.setUsedAt(now);
-            couponUser.setOrderId(savedOrder.getId());
-            couponUserRepository.save(couponUser);
+        if (calculation.selectedUserCouponId() != null) {
+            marketingClient.useCoupon(userId, calculation.selectedUserCouponId(), savedOrder.getId());
         }
 
         if (CART.equals(calculation.sourceType())) {
@@ -563,17 +523,17 @@ public class OrderService {
         );
     }
 
-    private ConfirmCouponResponse toCouponResponse(CouponUser userCoupon, Coupon coupon, boolean selected) {
+    private ConfirmCouponResponse toCouponResponse(MarketingCoupon coupon) {
         return new ConfirmCouponResponse(
-            userCoupon.getId(),
-            coupon.getId(),
-            coupon.getName(),
-            coupon.getCouponType(),
-            coupon.getThresholdAmount(),
-            PriceFormatter.formatCents(coupon.getThresholdAmount()),
-            coupon.getDiscountAmount(),
-            PriceFormatter.formatCents(coupon.getDiscountAmount()),
-            selected
+            coupon.userCouponId(),
+            coupon.couponId(),
+            coupon.name(),
+            coupon.couponType(),
+            coupon.thresholdAmount(),
+            PriceFormatter.formatCents(coupon.thresholdAmount()),
+            coupon.discountAmount(),
+            PriceFormatter.formatCents(coupon.discountAmount()),
+            Boolean.TRUE.equals(coupon.selected())
         );
     }
 
@@ -634,17 +594,15 @@ public class OrderService {
         String sourceType,
         MemberAddress address,
         List<SettlementItem> items,
-        CouponUser selectedCouponUser,
+        Long selectedUserCouponId,
         List<ConfirmCouponResponse> availableCoupons,
         PointSelection pointSelection,
         OrderAmountResponse amount
     ) {
     }
 
-    private record CouponCandidate(CouponUser userCoupon, Coupon coupon) {
-    }
 
-    private record CouponSelection(CouponUser selectedCouponUser, List<ConfirmCouponResponse> availableCoupons, int discountAmount) {
+    private record CouponSelection(Long selectedUserCouponId, List<ConfirmCouponResponse> availableCoupons, int discountAmount) {
     }
 
     private record PointSelection(boolean visible, int availablePoints, int deductionAmount, boolean selected) {

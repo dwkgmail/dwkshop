@@ -17,6 +17,7 @@
         <module>backend-product</module>
         <module>backend-cart</module>
         <module>backend-member</module>
+        <module>backend-marketing</module>
         <module>backend-order</module>
         <module>backend-aftersale</module>
         <module>backend-gateway</module>

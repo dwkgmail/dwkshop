@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: dwkshop-database-migrator
+  main:
+    web-application-type: none
+  datasource:
+    url: jdbc:mysql://localhost:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: dwkshop
+    password: dwkshop
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration

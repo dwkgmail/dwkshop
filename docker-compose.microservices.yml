@@ -3,6 +3,11 @@ services:
     extends:
       file: docker-compose.yml
       service: mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -udwkshop -pdwkshop --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
   redis:
     extends:
       file: docker-compose.yml
@@ -15,6 +20,20 @@ services:
     extends:
       file: docker-compose.yml
       service: elasticsearch
+
+  db-migrator:
+    build:
+      context: .
+      dockerfile: backend-migrator/Dockerfile
+    container_name: dwkshop-db-migrator
+    restart: "no"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: dwkshop
+      SPRING_DATASOURCE_PASSWORD: dwkshop
+    depends_on:
+      mysql:
+        condition: service_healthy
 
   gateway:
     build:
@@ -48,7 +67,10 @@ services:
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
     depends_on:
-      - mysql
+      db-migrator:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_started
 
   product-service:
     build:

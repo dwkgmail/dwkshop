@@ -11,6 +11,7 @@
     <name>dwkshop-services</name>
 
     <modules>
+        <module>backend-migrator</module>
         <module>backend-common</module>
         <module>backend-auth</module>
         <module>backend-product</module>

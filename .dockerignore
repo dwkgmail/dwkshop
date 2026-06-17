@@ -1,0 +1,14 @@
+.git
+.playwright-mcp
+
+**/target
+**/node_modules
+**/dist
+
+backend
+docs
+frontend-admin
+frontend-mobile
+
+*.docx
+*.png

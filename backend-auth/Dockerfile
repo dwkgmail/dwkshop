@@ -1,11 +1,14 @@
 FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /workspace
-COPY pom.xml .
-COPY src ./src
-RUN mvn -q -DskipTests package
+COPY backend-common/pom.xml backend-common/pom.xml
+COPY backend-common/src backend-common/src
+RUN mvn -q -f backend-common/pom.xml -DskipTests install
+COPY backend-auth/pom.xml backend-auth/pom.xml
+COPY backend-auth/src backend-auth/src
+RUN mvn -q -f backend-auth/pom.xml -DskipTests package
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
-COPY --from=build /workspace/target/*.jar app.jar
+COPY --from=build /workspace/backend-auth/target/*.jar app.jar
 EXPOSE 18081
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

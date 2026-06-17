@@ -15,6 +15,12 @@ The first runnable split introduces an API Gateway and five service runtimes:
 | order-service | 18084 | `/api/orders/**`, `/admin/orders/**` | `backend-order` |
 | aftersale-service | 18085 | `/api/aftersales/**`, `/admin/aftersales/**` | `backend-aftersale` |
 
+Shared HTTP auth and web infrastructure lives in `backend-common`. Run backend service builds from the repository root when you want Maven to resolve all extracted modules together:
+
+```bash
+mvn test
+```
+
 The services still share the existing backend codebase and database. This is intentional for the first step: the current order, cart, product, coupon, point, and aftersale flows share JPA entities and database transactions. Routing traffic through service names first lets frontend and deployment boundaries stabilize before data ownership is split.
 
 ## Run Locally
@@ -40,7 +46,7 @@ The frontend can continue to call `http://localhost:8080` because the gateway ke
 ## Migration Sequence
 
 1. Keep gateway routes stable and add service-level health checks. Basic auth runtime extraction is complete in `backend-auth`.
-2. Extract shared DTOs and error contracts into a small `common-api` module.
+2. Extract shared DTOs and error contracts into a small common module. Shared auth/web infrastructure is now in `backend-common`.
 3. Move product controllers, services, repositories, entities, migrations, and search integration into a real product service. Basic runtime extraction is complete in `backend-product`; table-specific migrations are still owned by the monolith migration set for now.
 4. Replace cart and order direct JPA reads of product tables with product-service APIs or product snapshot events. Cart now uses the product service SKU snapshot API.
 5. Move cart ownership, then order ownership, then aftersale ownership. Basic cart runtime extraction is complete in `backend-cart`; basic order runtime extraction is complete in `backend-order`; basic aftersale runtime extraction is complete in `backend-aftersale`.

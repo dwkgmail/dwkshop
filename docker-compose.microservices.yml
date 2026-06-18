@@ -29,8 +29,8 @@ services:
     restart: "no"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-      SPRING_DATASOURCE_USERNAME: dwkshop
-      SPRING_DATASOURCE_PASSWORD: dwkshop
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
     depends_on:
       mysql:
         condition: service_healthy
@@ -64,7 +64,7 @@ services:
     restart: unless-stopped
     environment:
       SERVER_PORT: 18081
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop_auth?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
@@ -83,7 +83,7 @@ services:
     environment:
       SERVER_PORT: 18082
       SPRING_FLYWAY_ENABLED: "false"
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop_product?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
       SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
@@ -104,7 +104,7 @@ services:
     environment:
       SERVER_PORT: 18083
       SPRING_FLYWAY_ENABLED: "false"
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop_cart?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
       DWKSHOP_PRODUCT_SERVICE_BASE_URL: http://product-service:18082
@@ -122,7 +122,7 @@ services:
     environment:
       SERVER_PORT: 18086
       SPRING_FLYWAY_ENABLED: "false"
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop_member?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
@@ -138,7 +138,7 @@ services:
     environment:
       SERVER_PORT: 18087
       SPRING_FLYWAY_ENABLED: "false"
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop_marketing?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
@@ -154,7 +154,7 @@ services:
     environment:
       SERVER_PORT: 18084
       SPRING_FLYWAY_ENABLED: "false"
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop_order?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
       SPRING_DATA_REDIS_HOST: redis
@@ -182,7 +182,7 @@ services:
     environment:
       SERVER_PORT: 18085
       SPRING_FLYWAY_ENABLED: "false"
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop_aftersale?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
       SPRING_RABBITMQ_HOST: rabbitmq

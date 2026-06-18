@@ -5,7 +5,7 @@ spring:
   application:
     name: dwkshop-auth-service
   datasource:
-    url: jdbc:mysql://localhost:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://localhost:3306/dwkshop_auth?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: dwkshop
     password: dwkshop
     driver-class-name: com.mysql.cj.jdbc.Driver

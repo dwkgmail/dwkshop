@@ -24,7 +24,7 @@ Database migrations run from `backend-migrator` instead of being owned by `auth-
 mvn test
 ```
 
-The services still share the existing database while table ownership is being separated incrementally. Cart, order, member, marketing, and aftersale no longer read each other's owned tables directly in the extracted runtimes; physical schema separation remains a later step.
+The extracted services now use dedicated schemas. Cart, order, member, marketing, and aftersale no longer read each other's owned tables directly. The complete table inventory and cut-over notes live in [`database-ownership.md`](database-ownership.md).
 
 ## Run Locally
 
@@ -53,7 +53,7 @@ The frontend can continue to call `http://localhost:8080` because the gateway ke
 3. Move product controllers, services, repositories, entities, migrations, and search integration into a real product service. Basic runtime extraction is complete in `backend-product`; table-specific migrations are currently centralized in `backend-migrator` until table ownership is split.
 4. Replace cart and order direct JPA access to product tables with product-service APIs or product snapshot events. Cart now uses the product service SKU snapshot API; order settlement reads product and notice data from that API; order stock locking now uses a product-service internal stock command.
 5. Move cart ownership, then order ownership, member ownership, marketing ownership, then aftersale ownership. Basic cart runtime extraction is complete in `backend-cart`; order now reads and clears cart items through cart-service internal APIs; member address and point account reads are served by `backend-member`; coupon selection and use are served by `backend-marketing`; basic order runtime extraction is complete in `backend-order`; aftersale now owns only `aftersale_order`, reads order snapshots through order-service, and sends apply/approve/reject commands to order-service. Refund stock release is delegated from order-service to product-service.
-6. Split the single database into per-service schemas after cross-service reads are removed.
+6. Split the single database into per-service schemas after cross-service reads are removed. Completed by migration V9; legacy tables are retained temporarily for rollback.
 7. Turn order-created and stock-related flows into RabbitMQ integration events with idempotent consumers.
 
 ## Rules During Extraction

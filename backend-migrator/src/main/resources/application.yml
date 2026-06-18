@@ -5,8 +5,9 @@ spring:
     web-application-type: none
   datasource:
     url: jdbc:mysql://localhost:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
-    username: dwkshop
-    password: dwkshop
+    # Schema creation/grants require an administrative migration account.
+    username: ${DWKSHOP_MIGRATOR_USERNAME:root}
+    password: ${DWKSHOP_MIGRATOR_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
   flyway:
     enabled: true

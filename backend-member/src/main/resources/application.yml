@@ -29,3 +29,5 @@ dwkshop:
   auth:
     secret: ${DWKSHOP_AUTH_SECRET:dwkshop-local-dev-secret-change-me}
     ttl-seconds: 86400
+  internal:
+    secret: ${DWKSHOP_INTERNAL_SECRET:dwkshop-local-internal-secret-change-me}

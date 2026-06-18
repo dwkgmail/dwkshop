@@ -9,25 +9,32 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class AuthInterceptor implements HandlerInterceptor {
 
     private final AuthTokenService tokenService;
+    private final InternalServiceAuthConfig internalServiceAuthConfig;
 
-    public AuthInterceptor(AuthTokenService tokenService) {
+    public AuthInterceptor(AuthTokenService tokenService, InternalServiceAuthConfig internalServiceAuthConfig) {
         this.tokenService = tokenService;
+        this.internalServiceAuthConfig = internalServiceAuthConfig;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        String token = resolveToken(request);
-        if (token != null) {
-            AuthContext.set(tokenService.verify(token));
+        String path = request.getRequestURI();
+        if (path.startsWith("/internal/")) {
+            verifyInternalRequest(request);
+            return true;
         }
 
-        String path = request.getRequestURI();
-        if (path.startsWith("/admin/") && requiresAdminAccess(path)) {
-            AuthPrincipal principal = AuthContext.current()
-                .filter(AuthPrincipal::isAdmin)
-                .orElseThrow(() -> new AuthException("请先登录后台"));
+        String token = resolveToken(request);
+        if (token != null) {
+            AuthPrincipal principal = tokenService.verify(token);
+            if (path.startsWith("/admin/") && requiresAdminAccess(path) && !principal.isAdmin()) {
+                throw new AuthException("admin login required");
+            }
             AuthContext.set(principal);
+        } else if (path.startsWith("/admin/") && requiresAdminAccess(path)) {
+            throw new AuthException("admin login required");
         }
+
         return true;
     }
 
@@ -51,5 +58,13 @@ public class AuthInterceptor implements HandlerInterceptor {
         return !path.equals("/admin/auth/login")
             && !path.equals("/admin/auth/refresh")
             && !path.equals("/admin/auth/logout");
+    }
+
+    private void verifyInternalRequest(HttpServletRequest request) {
+        String expectedSecret = internalServiceAuthConfig.internalSecret();
+        String actualSecret = request.getHeader(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER);
+        if (expectedSecret == null || expectedSecret.isBlank() || actualSecret == null || !expectedSecret.equals(actualSecret)) {
+            throw new AuthException("internal access unauthorized");
+        }
     }
 }

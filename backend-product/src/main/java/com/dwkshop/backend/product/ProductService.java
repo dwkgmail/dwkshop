@@ -3,10 +3,12 @@ package com.dwkshop.backend.product;
 import com.dwkshop.backend.domain.entity.Product;
 import com.dwkshop.backend.domain.entity.ProductCategory;
 import com.dwkshop.backend.domain.entity.ProductNotice;
+import com.dwkshop.backend.domain.entity.ProductRefundCommand;
 import com.dwkshop.backend.domain.entity.ProductSku;
 import com.dwkshop.backend.domain.repository.ProductCategoryRepository;
 import com.dwkshop.backend.domain.repository.ProductNoticeRepository;
 import com.dwkshop.backend.domain.repository.ProductRepository;
+import com.dwkshop.backend.domain.repository.ProductRefundCommandRepository;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.product.dto.AdminProductResponse;
 import com.dwkshop.backend.product.dto.CategoryResponse;
@@ -17,6 +19,12 @@ import com.dwkshop.backend.product.dto.ProductSkuResponse;
 import com.dwkshop.backend.product.dto.ProductSkuSnapshotResponse;
 import com.dwkshop.backend.product.dto.ProductSummaryResponse;
 import com.dwkshop.backend.product.dto.ProductUpsertRequest;
+import com.dwkshop.backend.product.dto.RefundStockItemRequest;
+import com.dwkshop.backend.product.dto.RefundStockItemResponse;
+import com.dwkshop.backend.product.dto.RefundStockRequest;
+import com.dwkshop.backend.product.dto.RefundStockResponse;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dwkshop.backend.util.PriceFormatter;
 import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
@@ -44,20 +52,26 @@ public class ProductService {
     private final ProductSkuRepository productSkuRepository;
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductNoticeRepository productNoticeRepository;
+    private final ProductRefundCommandRepository productRefundCommandRepository;
     private final ProductSearchGateway productSearchGateway;
+    private final ObjectMapper objectMapper;
 
     public ProductService(
         ProductRepository productRepository,
         ProductSkuRepository productSkuRepository,
         ProductCategoryRepository productCategoryRepository,
         ProductNoticeRepository productNoticeRepository,
-        ProductSearchGateway productSearchGateway
+        ProductRefundCommandRepository productRefundCommandRepository,
+        ProductSearchGateway productSearchGateway,
+        ObjectMapper objectMapper
     ) {
         this.productRepository = productRepository;
         this.productSkuRepository = productSkuRepository;
         this.productCategoryRepository = productCategoryRepository;
         this.productNoticeRepository = productNoticeRepository;
+        this.productRefundCommandRepository = productRefundCommandRepository;
         this.productSearchGateway = productSearchGateway;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -172,6 +186,16 @@ public class ProductService {
             saved.getLockedStock(),
             saved.getSkuStatus()
         );
+    }
+
+    @Transactional
+    public RefundStockResponse releaseRefundStock(RefundStockRequest request) {
+        return executeRefundCommand(request, "RELEASE");
+    }
+
+    @Transactional
+    public RefundStockResponse restoreRefundStock(RefundStockRequest request) {
+        return executeRefundCommand(request, "RESTORE");
     }
 
     @Transactional(readOnly = true)
@@ -436,6 +460,131 @@ public class ProductService {
             category.getSortOrder(),
             category.getStatus()
         );
+    }
+
+    private RefundStockResponse executeRefundCommand(RefundStockRequest request, String expectedType) {
+        if (!expectedType.equals(request.commandType())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported refund command type");
+        }
+        ProductRefundCommand existing = productRefundCommandRepository.findByCommandNo(request.commandNo()).orElse(null);
+        if (existing != null) {
+            if ("DONE".equals(existing.getCommandStatus())) {
+                return readRefundResponse(existing);
+            }
+            if ("PROCESSING".equals(existing.getCommandStatus())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Refund command is processing");
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        ProductRefundCommand command = existing == null ? new ProductRefundCommand() : existing;
+        command.setCommandNo(request.commandNo());
+        command.setCommandType(request.commandType());
+        command.setCommandStatus("PROCESSING");
+        command.setPayloadJson(writeValue(request));
+        command.setUpdatedAt(now);
+        if (command.getCreatedAt() == null) {
+            command.setCreatedAt(now);
+        }
+        productRefundCommandRepository.save(command);
+
+        try {
+            List<RefundStockItemResponse> resultItems = switch (expectedType) {
+                case "RELEASE" -> applyRelease(request.items());
+                case "RESTORE" -> applyRestore(request.items());
+                default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported refund command type");
+            };
+            RefundStockResponse response = new RefundStockResponse(request.commandNo(), request.commandType(), "DONE", resultItems);
+            command.setCommandStatus("DONE");
+            command.setResultJson(writeValue(response));
+            command.setLastError(null);
+            command.setUpdatedAt(LocalDateTime.now());
+            productRefundCommandRepository.save(command);
+            return response;
+        } catch (RuntimeException ex) {
+            command.setCommandStatus("FAILED");
+            command.setLastError(trimError(ex.getMessage()));
+            command.setUpdatedAt(LocalDateTime.now());
+            productRefundCommandRepository.save(command);
+            throw ex;
+        }
+    }
+
+    private List<RefundStockItemResponse> applyRelease(List<RefundStockItemRequest> items) {
+        return items.stream().map(item -> {
+            ProductSku sku = productSkuRepository.findByIdForUpdate(item.skuId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格不存在"));
+            if (!ENABLED.equals(sku.getSkuStatus())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
+            }
+            if (sku.getLockedStock() < item.quantity()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "锁定库存不足，无法执行退款释放");
+            }
+            sku.setLockedStock(sku.getLockedStock() - item.quantity());
+            sku.setStock(sku.getStock() + item.quantity());
+            sku.setUpdatedAt(LocalDateTime.now());
+            ProductSku saved = productSkuRepository.save(sku);
+            return new RefundStockItemResponse(
+                saved.getId(),
+                saved.getSkuName(),
+                saved.getStock(),
+                saved.getLockedStock(),
+                saved.getSkuStatus(),
+                item.quantity(),
+                item.quantity(),
+                -item.quantity()
+            );
+        }).toList();
+    }
+
+    private List<RefundStockItemResponse> applyRestore(List<RefundStockItemRequest> items) {
+        return items.stream().map(item -> {
+            ProductSku sku = productSkuRepository.findByIdForUpdate(item.skuId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格不存在"));
+            if (!ENABLED.equals(sku.getSkuStatus())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
+            }
+            if (sku.getStock() < item.quantity()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "可用库存不足，无法补偿退款释放");
+            }
+            sku.setStock(sku.getStock() - item.quantity());
+            sku.setLockedStock(sku.getLockedStock() + item.quantity());
+            sku.setUpdatedAt(LocalDateTime.now());
+            ProductSku saved = productSkuRepository.save(sku);
+            return new RefundStockItemResponse(
+                saved.getId(),
+                saved.getSkuName(),
+                saved.getStock(),
+                saved.getLockedStock(),
+                saved.getSkuStatus(),
+                item.quantity(),
+                -item.quantity(),
+                item.quantity()
+            );
+        }).toList();
+    }
+
+    private RefundStockResponse readRefundResponse(ProductRefundCommand command) {
+        try {
+            return objectMapper.readValue(command.getResultJson(), RefundStockResponse.class);
+        } catch (JsonProcessingException ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Refund command cache is corrupted", ex);
+        }
+    }
+
+    private String writeValue(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to serialize refund command", ex);
+        }
+    }
+
+    private String trimError(String message) {
+        if (message == null) {
+            return null;
+        }
+        return message.length() <= 255 ? message : message.substring(0, 255);
     }
 
     private Integer minSalePrice(List<ProductSku> skus) {

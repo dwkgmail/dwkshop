@@ -272,26 +272,7 @@ public class OrderService {
 
     @Transactional
     public AftersaleOrderSnapshot approveAftersale(Long orderId) {
-        TradeOrder order = tradeOrderRepository.findById(orderId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if (!AFTERSALE_APPLYING.equals(order.getAftersaleStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单售后状态不是处理中");
-        }
-        List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
-        if ("WAIT_SHIP".equals(order.getOrderStatus())) {
-            for (TradeOrderItem item : items) {
-                productCatalogClient.releaseSkuStock(item.getSkuId(), item.getQuantity());
-            }
-        }
-        for (TradeOrderItem item : items) {
-            item.setAftersaleQuantity(item.getQuantity());
-        }
-        tradeOrderItemRepository.saveAll(items);
-        order.setOrderStatus(AFTERSALE_REFUNDED);
-        order.setPayStatus(AFTERSALE_REFUNDED);
-        order.setAftersaleStatus(AFTERSALE_REFUNDED);
-        order.setUpdatedAt(LocalDateTime.now());
-        return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
+        return completeAftersale(orderId);
     }
 
     @Transactional
@@ -304,6 +285,51 @@ public class OrderService {
         order.setAftersaleStatus(AFTERSALE_REJECTED);
         order.setUpdatedAt(LocalDateTime.now());
         return toAftersaleSnapshot(tradeOrderRepository.save(order));
+    }
+
+    @Transactional(readOnly = true)
+    public RefundOrderContext getRefundContext(Long orderId) {
+        TradeOrder order = tradeOrderRepository.findById(orderId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+        List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
+        boolean refundable = !items.isEmpty()
+            && items.stream().allMatch(item -> Boolean.TRUE.equals(item.getSupportRefund()));
+        return new RefundOrderContext(
+            order.getId(),
+            order.getOrderNo(),
+            order.getUserId(),
+            order.getOrderStatus(),
+            order.getPayStatus(),
+            order.getDeliveryStatus(),
+            order.getAftersaleStatus(),
+            order.getPayAmount(),
+            refundable,
+            items.stream()
+                .map(item -> new RefundOrderItemSnapshot(item.getSkuId(), item.getProductId(), item.getQuantity(), item.getSupportRefund()))
+                .toList()
+        );
+    }
+
+    @Transactional
+    public AftersaleOrderSnapshot completeAftersale(Long orderId) {
+        TradeOrder order = tradeOrderRepository.findById(orderId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+        if (AFTERSALE_REFUNDED.equals(order.getAftersaleStatus())) {
+            return toAftersaleSnapshot(order);
+        }
+        if (!AFTERSALE_APPLYING.equals(order.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单售后状态不是处理中");
+        }
+        List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
+        for (TradeOrderItem item : items) {
+            item.setAftersaleQuantity(item.getQuantity());
+        }
+        tradeOrderItemRepository.saveAll(items);
+        order.setOrderStatus(AFTERSALE_REFUNDED);
+        order.setPayStatus(AFTERSALE_REFUNDED);
+        order.setAftersaleStatus(AFTERSALE_REFUNDED);
+        order.setUpdatedAt(LocalDateTime.now());
+        return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
     }
 
     private AftersaleOrderSnapshot toAftersaleSnapshot(TradeOrder order) {

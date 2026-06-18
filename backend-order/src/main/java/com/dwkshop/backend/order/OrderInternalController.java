@@ -22,6 +22,11 @@ public class OrderInternalController {
         return orderService.getAftersaleSnapshot(orderId);
     }
 
+    @GetMapping("/{orderId}/refund-context")
+    public RefundOrderContext getRefundContext(@PathVariable Long orderId) {
+        return orderService.getRefundContext(orderId);
+    }
+
     @PostMapping("/{orderId}/aftersale/apply")
     public AftersaleOrderSnapshot applyAftersale(@PathVariable Long orderId, @RequestParam Long userId) {
         return orderService.applyAftersale(orderId, userId);
@@ -29,7 +34,7 @@ public class OrderInternalController {
 
     @PostMapping("/{orderId}/aftersale/approve")
     public AftersaleOrderSnapshot approveAftersale(@PathVariable Long orderId) {
-        return orderService.approveAftersale(orderId);
+        return orderService.completeAftersale(orderId);
     }
 
     @PostMapping("/{orderId}/aftersale/reject")

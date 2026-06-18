@@ -1,6 +1,8 @@
 package com.dwkshop.backend.product;
 
 import com.dwkshop.backend.product.dto.ProductSkuSnapshotResponse;
+import com.dwkshop.backend.product.dto.RefundStockRequest;
+import com.dwkshop.backend.product.dto.RefundStockResponse;
 import com.dwkshop.backend.product.dto.LockSkuStockRequest;
 import com.dwkshop.backend.product.dto.LockSkuStockResponse;
 import jakarta.validation.Valid;
@@ -34,5 +36,15 @@ public class ProductInternalController {
     @PostMapping("/skus/{skuId}/stock-releases")
     public LockSkuStockResponse releaseSkuStock(@PathVariable Long skuId, @Valid @RequestBody LockSkuStockRequest request) {
         return productService.releaseSkuStock(skuId, request.quantity());
+    }
+
+    @PostMapping("/refunds/release")
+    public RefundStockResponse releaseRefundStock(@Valid @RequestBody RefundStockRequest request) {
+        return productService.releaseRefundStock(request);
+    }
+
+    @PostMapping("/refunds/restore")
+    public RefundStockResponse restoreRefundStock(@Valid @RequestBody RefundStockRequest request) {
+        return productService.restoreRefundStock(request);
     }
 }

@@ -34,3 +34,5 @@ dwkshop:
   services:
     order:
       base-url: ${DWKSHOP_ORDER_SERVICE_BASE_URL:http://localhost:18084}
+    product:
+      base-url: ${DWKSHOP_PRODUCT_SERVICE_BASE_URL:http://localhost:18082}

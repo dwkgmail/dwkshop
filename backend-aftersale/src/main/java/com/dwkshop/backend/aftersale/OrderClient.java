@@ -28,6 +28,16 @@ public class OrderClient {
             .block();
     }
 
+    public RefundOrderContext getRefundContext(Long orderId) {
+        return webClient.get()
+            .uri("/internal/orders/{orderId}/refund-context", orderId)
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.createException()
+                .map(ex -> new ResponseStatusException(response.statusCode(), "Order refund context is unavailable")))
+            .bodyToMono(RefundOrderContext.class)
+            .block();
+    }
+
     public AftersaleOrderSnapshot applyAftersale(Long orderId, Long userId) {
         return webClient.post()
             .uri(uriBuilder -> uriBuilder
@@ -42,11 +52,21 @@ public class OrderClient {
     }
 
     public AftersaleOrderSnapshot approveAftersale(Long orderId) {
-        return changeAftersaleStatus(orderId, "approve");
+        return completeAftersale(orderId);
     }
 
     public AftersaleOrderSnapshot rejectAftersale(Long orderId) {
         return changeAftersaleStatus(orderId, "reject");
+    }
+
+    public AftersaleOrderSnapshot completeAftersale(Long orderId) {
+        return webClient.post()
+            .uri("/internal/orders/{orderId}/aftersale/approve", orderId)
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.createException()
+                .map(ex -> new ResponseStatusException(response.statusCode(), "Order aftersale completion failed")))
+            .bodyToMono(AftersaleOrderSnapshot.class)
+            .block();
     }
 
     private AftersaleOrderSnapshot changeAftersaleStatus(Long orderId, String action) {

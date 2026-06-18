@@ -5,8 +5,8 @@
 body {
   margin: 0;
   min-width: 320px;
-  background: #eef1f5;
-  color: #222;
+  background: #e9edf2;
+  color: #18202b;
   font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
 }
 
@@ -29,7 +29,8 @@ button:disabled {
   width: min(430px, 100%);
   min-height: 100vh;
   margin: 0 auto;
-  background: #f7f8fa;
+  background: #f6f7f9;
+  box-shadow: 0 0 0 1px rgba(24, 32, 43, 0.04), 0 24px 70px rgba(24, 32, 43, 0.08);
 }
 
 .app-content {
@@ -54,7 +55,7 @@ button:disabled {
 }
 
 .home-top {
-  padding: 10px 2px 14px;
+  padding: 10px 2px 18px;
 }
 
 .home-top span,
@@ -72,7 +73,8 @@ button:disabled {
 
 .home-top h1 {
   margin: 4px 0 0;
-  font-size: 28px;
+  font-size: 26px;
+  line-height: 1.2;
 }
 
 .login-view {
@@ -153,9 +155,12 @@ button:disabled {
 }
 
 .round-btn {
+  min-width: 58px;
   padding: 8px 13px;
-  border-radius: 18px;
-  color: #ff6a00;
+  border: 1px solid #e4e8ee;
+  border-radius: 8px;
+  color: #e95d00;
+  font-weight: 700;
 }
 
 .icon-btn {
@@ -170,7 +175,8 @@ button:disabled {
   top: 0;
   z-index: 5;
   padding: 10px 14px;
-  background: rgba(247, 248, 250, 0.96);
+  border-bottom: 1px solid rgba(228, 232, 238, 0.9);
+  background: rgba(246, 247, 249, 0.96);
   backdrop-filter: blur(8px);
 }
 
@@ -194,8 +200,8 @@ button:disabled {
 .search-bar input {
   min-width: 0;
   height: 42px;
-  border: 0;
-  border-radius: 21px;
+  border: 1px solid #e1e6ed;
+  border-radius: 8px;
   padding: 0 16px;
   background: #fff;
 }
@@ -203,8 +209,8 @@ button:disabled {
 .search-bar button,
 .primary {
   border: 0;
-  border-radius: 21px;
-  background: #ff6a00;
+  border-radius: 8px;
+  background: #e95d00;
   color: #fff;
   font-weight: 700;
 }
@@ -218,13 +224,11 @@ button:disabled {
   border-radius: 8px;
   padding: 22px;
   color: #fff;
-  background:
-    radial-gradient(circle at 85% 28%, rgba(255, 255, 255, 0.34), transparent 24%),
-    linear-gradient(135deg, #ff6a00, #ff9f1c);
+  background: #202a36;
 }
 
 .hero-card.subtle {
-  background: linear-gradient(135deg, #2f3645, #ff6a00);
+  background: #3a4654;
 }
 
 .hero-card span {
@@ -258,6 +262,8 @@ button:disabled {
   min-height: 56px;
   border-radius: 8px;
   color: #333;
+  border: 1px solid #e8ebf0;
+  font-weight: 700;
 }
 
 .section-title {
@@ -294,6 +300,11 @@ button:disabled {
 
 .product-card {
   overflow: hidden;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.product-card:active {
+  transform: scale(0.985);
 }
 
 .product-visual,
@@ -306,7 +317,8 @@ button:disabled {
 }
 
 .product-visual {
-  height: 126px;
+  aspect-ratio: 1 / 0.78;
+  height: auto;
   font-size: 28px;
 }
 
@@ -325,23 +337,23 @@ button:disabled {
 }
 
 .tone-orange {
-  background: linear-gradient(135deg, #ff6a00, #ffb347);
+  background: #ef8354;
 }
 
 .tone-green {
-  background: linear-gradient(135deg, #22c55e, #80d8a5);
+  background: #56a57a;
 }
 
 .tone-blue {
-  background: linear-gradient(135deg, #3b82f6, #8ec5ff);
+  background: #5687bd;
 }
 
 .tone-dark {
-  background: linear-gradient(135deg, #333, #79808f);
+  background: #4f5968;
 }
 
 .tone-pink {
-  background: linear-gradient(135deg, #ec4899, #ff9fbd);
+  background: #c86f8a;
 }
 
 .product-info {
@@ -384,7 +396,7 @@ button:disabled {
 .cart-bottom p,
 .order-line p,
 .orange {
-  color: #ff6a00;
+  color: #e95d00;
   font-weight: 800;
 }
 
@@ -751,7 +763,9 @@ button:disabled {
   width: min(430px, 100%);
   margin: 0 auto;
   border-top: 1px solid #e5e7eb;
-  background: #fff;
+  padding-bottom: env(safe-area-inset-bottom);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
 }
 
 .tabbar button {
@@ -763,7 +777,7 @@ button:disabled {
 }
 
 .tabbar button.active {
-  color: #ff6a00;
+  color: #e95d00;
   font-weight: 800;
 }
 
@@ -809,4 +823,14 @@ button:disabled {
   gap: 6px;
   color: #6b7280;
   font-size: 13px;
+}
+
+@media (min-width: 700px) {
+  .app-shell {
+    margin-top: 20px;
+    margin-bottom: 20px;
+    min-height: calc(100vh - 40px);
+    border-radius: 8px;
+    overflow: hidden;
+  }
 }

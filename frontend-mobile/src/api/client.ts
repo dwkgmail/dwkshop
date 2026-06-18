@@ -49,6 +49,7 @@ function notifyAuthExpired() {
 
 async function parseError(response: Response) {
   let message = `请求失败 (${response.status})`;
+  if (response.status >= 500) return message;
   try {
     const body = await response.json();
     message = body.message || body.error || message;

@@ -38,6 +38,7 @@ const placeholderTitle = ref('');
 const loading = ref(false);
 const error = ref('');
 const toast = ref('');
+const displayError = computed(() => error.value.startsWith('请求失败 (500)') ? '请求失败（500），请稍后重试' : error.value);
 
 const products = ref<AdminProduct[]>([]);
 const categories = ref<Category[]>([]);
@@ -374,7 +375,7 @@ function addSku() {
 
 function removeSku(index: number) {
   if (productForm.skus.length === 1) {
-    showToast('鑷冲皯淇濈暀涓€涓?SKU');
+    showToast('至少保留一个 SKU');
     return;
   }
   productForm.skus.splice(index, 1);
@@ -573,15 +574,15 @@ onUnmounted(() => {
               page === 'product-create' ? '新增商品' :
               page === 'product-edit' ? '编辑商品' :
               page === 'orders' ? '订单列表' :
-              page === 'aftersales' ? 'After-sale' :
+              page === 'aftersales' ? '售后管理' :
               page === 'order-detail' ? '订单详情' : placeholderTitle
             }}
           </h1>
           <span>高效管理商品、订单与运营数据</span>
         </div>
         <div class="topbar-actions">
-          <button class="ghost" @click="showPasswordPanel = !showPasswordPanel">Change password</button>
-          <button class="ghost" @click="logout">Logout</button>
+          <button class="ghost" @click="showPasswordPanel = !showPasswordPanel">修改密码</button>
+          <button class="ghost" @click="logout">退出登录</button>
         </div>
       </header>
 
@@ -596,12 +597,12 @@ onUnmounted(() => {
         <section class="metrics">
           <article><span>订单总数</span><strong>{{ dashboard.orderCount }}</strong></article>
           <article><span>支付金额</span><strong>¥{{ dashboard.payAmountText }}</strong></article>
-          <article><span>Waiting shipment</span><strong>{{ dashboard.waitShip }}</strong></article>
-          <article><span>Refund applying</span><strong>{{ dashboard.refundApplying }}</strong></article>
+          <article><span>待发货</span><strong>{{ dashboard.waitShip }}</strong></article>
+          <article><span>退款处理中</span><strong>{{ dashboard.refundApplying }}</strong></article>
         </section>
         <section class="dashboard-grid">
           <div class="panel">
-            <h2>閿€鍞秼鍔</h2>
+            <h2>销售趋势</h2>
             <div class="chart-line">
               <i v-for="height in [38, 54, 42, 76, 62, 88, 104]" :key="height" :style="{ height: `${height}px` }"></i>
             </div>
@@ -611,7 +612,7 @@ onUnmounted(() => {
             <div class="quick-actions">
               <button @click="openCreate">新增商品</button>
               <button @click="nav('orders')">查看订单</button>
-              <button @click="nav('aftersale')">After-sale</button>
+              <button @click="nav('aftersale')">售后管理</button>
               <button @click="nav('products')">商品管理</button>
             </div>
           </div>
@@ -626,7 +627,7 @@ onUnmounted(() => {
             <option v-for="category in categories" :key="category.id" :value="category.id">{{ category.name }}</option>
           </select>
           <select v-model="productFilters.saleStatus">
-            <option value="">鍏ㄩ儴鐘舵€</option>
+            <option value="">全部状态</option>
             <option value="ON_SALE">上架</option>
             <option value="OFF_SALE">下架</option>
           </select>
@@ -640,8 +641,8 @@ onUnmounted(() => {
                 <th>分类</th>
                 <th>价格</th>
                 <th>库存</th>
-                <th>閿€閲</th>
-                <th>鐘舵€</th>
+                <th>销量</th>
+                <th>状态</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -683,7 +684,7 @@ onUnmounted(() => {
           <label><input v-model="productForm.allowCart" type="checkbox" /> 允许加购</label>
           <label><input v-model="productForm.allowSingleBuy" type="checkbox" /> 允许单独购买</label>
           <label><input v-model="productForm.pointDeductEnabled" type="checkbox" /> 支持积分抵扣</label>
-          <label><input v-model="productForm.pointRewardEnabled" type="checkbox" /> 杩旂Н鍒</label>
+          <label><input v-model="productForm.pointRewardEnabled" type="checkbox" /> 返积分</label>
           <label>Reward points<input v-model.number="productForm.pointReward" type="number" min="0" /></label>
         </section>
         <section class="panel">
@@ -713,12 +714,12 @@ onUnmounted(() => {
       <section v-else-if="page === 'orders'" class="page">
         <section class="panel filters">
           <input v-model="orderFilters.orderNo" placeholder="订单编号" />
-          <input v-model="orderFilters.mobile" placeholder="Mobile" />
+          <input v-model="orderFilters.mobile" placeholder="手机号" />
           <select v-model="orderFilters.orderStatus">
-            <option value="">鍏ㄩ儴鐘舵€</option>
-            <option value="WAIT_PAY">寰呮敮浠</option>
-            <option value="CANCELED">宸插彇娑</option>
-            <option value="WAIT_SHIP">寰呭彂璐</option>
+            <option value="">全部状态</option>
+            <option value="WAIT_PAY">待支付</option>
+            <option value="CANCELED">已取消</option>
+            <option value="WAIT_SHIP">待发货</option>
           </select>
           <button class="primary" @click="loadOrders">查询</button>
         </section>
@@ -727,11 +728,11 @@ onUnmounted(() => {
             <thead>
               <tr>
                 <th>订单编号</th>
-                <th>鎵嬫満鍙</th>
+                <th>手机号</th>
                 <th>下单时间</th>
                 <th>金额</th>
-                <th>璁㈠崟鐘舵€</th>
-                <th>鏀粯鐘舵€</th>
+                <th>订单状态</th>
+                <th>支付状态</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -756,14 +757,14 @@ onUnmounted(() => {
           <table>
             <thead>
               <tr>
-                <th>After-sale No</th>
-                <th>Order No</th>
-                <th>Mobile</th>
-                <th>Amount</th>
-                <th>Reason</th>
-                <th>Status</th>
-                <th>Apply time</th>
-                <th>Actions</th>
+                <th>售后编号</th>
+                <th>订单编号</th>
+                <th>手机号</th>
+                <th>退款金额</th>
+                <th>申请原因</th>
+                <th>状态</th>
+                <th>申请时间</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -776,95 +777,95 @@ onUnmounted(() => {
                 <td><em class="status">{{ statusText(item.aftersaleStatus) }}</em></td>
                 <td>{{ item.applyTime?.replace('T', ' ').slice(0, 19) }}</td>
                 <td class="actions">
-                  <button v-if="item.aftersaleStatus === 'APPLYING'" @click="approveRefund(item.id)">Approve</button>
-                  <button v-if="item.aftersaleStatus === 'APPLYING'" @click="rejectRefund(item.id)">Reject</button>
-                  <button @click="openOrderDetail(item.orderId)">Order</button>
+                  <button v-if="item.aftersaleStatus === 'APPLYING'" @click="approveRefund(item.id)">通过</button>
+                  <button v-if="item.aftersaleStatus === 'APPLYING'" @click="rejectRefund(item.id)">拒绝</button>
+                  <button @click="openOrderDetail(item.orderId)">查看订单</button>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div v-if="aftersales.length === 0" class="empty">No after-sale requests</div>
+          <div v-if="aftersales.length === 0" class="empty">暂无售后申请</div>
         </section>
       </section>
 
       <section v-else-if="page === 'order-detail' && currentOrder" class="page detail-grid">
         <section class="panel info-list">
-          <h2>??????</h2>
-          <div><span>??????</span><strong>{{ currentOrder.orderNo }}</strong></div>
-          <div><span>?????????</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
-          <div><span>After-sale</span><strong>{{ statusText(currentOrder.aftersaleStatus) }}</strong></div>
-          <div><span>??????</span><strong>{{ currentOrder.createdAt?.replace('T', ' ').slice(0, 19) }}</strong></div>
-          <div><span>???</span><strong>{{ currentOrder.remark || '-' }}</strong></div>
+          <h2>订单信息</h2>
+          <div><span>订单编号</span><strong>{{ currentOrder.orderNo }}</strong></div>
+          <div><span>订单状态</span><strong>{{ statusText(currentOrder.orderStatus) }}</strong></div>
+          <div><span>售后状态</span><strong>{{ statusText(currentOrder.aftersaleStatus) }}</strong></div>
+          <div><span>下单时间</span><strong>{{ currentOrder.createdAt?.replace('T', ' ').slice(0, 19) }}</strong></div>
+          <div><span>订单备注</span><strong>{{ currentOrder.remark || '-' }}</strong></div>
         </section>
         <section class="panel info-list">
-          <h2>??????</h2>
-          <div><span>Receiver</span><strong>{{ currentOrder.receiverName }}</strong></div>
-          <div><span>Mobile</span><strong>{{ currentOrder.receiverMobile }}</strong></div>
-          <div><span>???</span><strong>{{ currentOrder.receiverAddress }}</strong></div>
+          <h2>收货信息</h2>
+          <div><span>收货人</span><strong>{{ currentOrder.receiverName }}</strong></div>
+          <div><span>手机号</span><strong>{{ currentOrder.receiverMobile }}</strong></div>
+          <div><span>收货地址</span><strong>{{ currentOrder.receiverAddress }}</strong></div>
         </section>
         <section class="panel table-panel full-row">
-          <h2>??????</h2>
+          <h2>商品明细</h2>
           <table>
-            <thead><tr><th>???</th><th>SKU</th><th>???</th><th>???</th><th>???</th></tr></thead>
+            <thead><tr><th>商品</th><th>SKU</th><th>单价</th><th>数量</th><th>实付</th></tr></thead>
             <tbody>
               <tr v-for="item in currentOrder.items" :key="item.id">
                 <td>{{ item.productName }}</td>
                 <td>{{ item.skuName }}</td>
-                <td>?{{ item.salePriceText }}</td>
+                <td>¥{{ item.salePriceText }}</td>
                 <td>{{ item.quantity }}</td>
-                <td>?{{ item.payAmountText }}</td>
+                <td>¥{{ item.payAmountText }}</td>
               </tr>
             </tbody>
           </table>
         </section>
         <section class="panel info-list">
-          <h2>??????</h2>
-          <div><span>??????</span><strong>?{{ currentOrder.amount.productAmountText }}</strong></div>
-          <div><span>??????</span><strong>-?{{ currentOrder.amount.couponDiscountAmountText }}</strong></div>
-          <div><span>??????</span><strong>-?{{ currentOrder.amount.pointDiscountAmountText }}</strong></div>
-          <div><span>???</span><strong>?{{ currentOrder.amount.freightAmountText }}</strong></div>
-          <div><span>???</span><strong class="orange">?{{ currentOrder.amount.payAmountText }}</strong></div>
+          <h2>金额信息</h2>
+          <div><span>商品金额</span><strong>¥{{ currentOrder.amount.productAmountText }}</strong></div>
+          <div><span>优惠券</span><strong>-¥{{ currentOrder.amount.couponDiscountAmountText }}</strong></div>
+          <div><span>积分抵扣</span><strong>-¥{{ currentOrder.amount.pointDiscountAmountText }}</strong></div>
+          <div><span>运费</span><strong>¥{{ currentOrder.amount.freightAmountText }}</strong></div>
+          <div><span>实付金额</span><strong class="orange">¥{{ currentOrder.amount.payAmountText }}</strong></div>
         </section>
         <section class="panel info-list">
-          <h2>??????</h2>
-          <div><span>Pay status</span><strong>{{ statusText(currentOrder.payStatus) }}</strong></div>
-          <div><span>??????</span><strong>?{{ currentOrder.payAmountText }}</strong></div>
-          <div><span>??????</span><strong>{{ currentOrder.payExpireTime?.replace('T', ' ').slice(0, 19) }}</strong></div>
+          <h2>支付信息</h2>
+          <div><span>支付状态</span><strong>{{ statusText(currentOrder.payStatus) }}</strong></div>
+          <div><span>支付金额</span><strong>¥{{ currentOrder.payAmountText }}</strong></div>
+          <div><span>支付截止</span><strong>{{ currentOrder.payExpireTime?.replace('T', ' ').slice(0, 19) }}</strong></div>
         </section>
         <section class="panel info-list">
-          <h2>Delivery</h2>
-          <div><span>Status</span><strong>{{ statusText(currentOrder.deliveryStatus) }}</strong></div>
-          <div><span>Logistics</span><strong>{{ currentOrder.logisticsCompany || '-' }}</strong></div>
-          <div><span>Tracking No.</span><strong>{{ currentOrder.logisticsNo || '-' }}</strong></div>
-          <div><span>Shipped at</span><strong>{{ currentOrder.deliveryTime?.replace('T', ' ').slice(0, 19) || '-' }}</strong></div>
-          <div><span>Remark</span><strong>{{ currentOrder.deliveryRemark || '-' }}</strong></div>
+          <h2>物流信息</h2>
+          <div><span>配送状态</span><strong>{{ statusText(currentOrder.deliveryStatus) }}</strong></div>
+          <div><span>物流公司</span><strong>{{ currentOrder.logisticsCompany || '-' }}</strong></div>
+          <div><span>物流单号</span><strong>{{ currentOrder.logisticsNo || '-' }}</strong></div>
+          <div><span>发货时间</span><strong>{{ currentOrder.deliveryTime?.replace('T', ' ').slice(0, 19) || '-' }}</strong></div>
+          <div><span>配送备注</span><strong>{{ currentOrder.deliveryRemark || '-' }}</strong></div>
         </section>
         <section class="panel full-row">
-          <h2>????</h2>
+          <h2>订单发货</h2>
           <div class="form-grid">
-            <label>????<input v-model="shippingForm.logisticsCompany" :disabled="!canShipCurrentOrder" /></label>
-            <label>????<input v-model="shippingForm.logisticsNo" :disabled="!canShipCurrentOrder" /></label>
-            <label class="full">????<textarea v-model="shippingForm.deliveryRemark" :disabled="!canShipCurrentOrder"></textarea></label>
+            <label>物流公司<input v-model="shippingForm.logisticsCompany" :disabled="!canShipCurrentOrder" /></label>
+            <label>物流单号<input v-model="shippingForm.logisticsNo" :disabled="!canShipCurrentOrder" /></label>
+            <label class="full">发货备注<textarea v-model="shippingForm.deliveryRemark" :disabled="!canShipCurrentOrder"></textarea></label>
           </div>
           <div class="form-actions">
-            <button class="primary" :disabled="!canShipCurrentOrder" @click="submitShipment">????</button>
+            <button class="primary" :disabled="!canShipCurrentOrder" @click="submitShipment">确认发货</button>
           </div>
         </section>
         <section class="panel full-row">
-          <h2>??????</h2>
+          <h2>更新配送状态</h2>
           <div class="form-grid">
             <label>
-              ????
+              配送状态
               <select v-model="deliveryStatusForm.deliveryStatus" :disabled="!canUpdateDeliveryCurrentOrder">
-                <option value="SHIPPED">???</option>
-                <option value="IN_TRANSIT">???</option>
-                <option value="DELIVERED">???</option>
+                <option value="SHIPPED">已发货</option>
+                <option value="IN_TRANSIT">运输中</option>
+                <option value="DELIVERED">已送达</option>
               </select>
             </label>
-            <label class="full">????<textarea v-model="deliveryStatusForm.deliveryRemark" :disabled="!canUpdateDeliveryCurrentOrder"></textarea></label>
+            <label class="full">配送备注<textarea v-model="deliveryStatusForm.deliveryRemark" :disabled="!canUpdateDeliveryCurrentOrder"></textarea></label>
           </div>
           <div class="form-actions">
-            <button class="primary" :disabled="!canUpdateDeliveryCurrentOrder" @click="submitDeliveryStatus">??????</button>
+            <button class="primary" :disabled="!canUpdateDeliveryCurrentOrder" @click="submitDeliveryStatus">更新配送状态</button>
           </div>
         </section>
       </section>
@@ -872,12 +873,12 @@ onUnmounted(() => {
       <section v-else class="page">
         <section class="panel placeholder">
           <h2>{{ placeholderTitle }}</h2>
-          <p>该模块已在菜单中预留，后续按 MVP 鑺傚鎺ュ叆銆</p>
+          <p>该模块已在菜单中预留，后续按 MVP 节奏接入。</p>
         </section>
       </section>
 
-      <div v-if="loading" class="loading">鍔犺浇涓?..</div>
-      <div v-if="error" class="error-box"><span>{{ error }}</span><button @click="error = ''">关闭</button></div>
+      <div v-if="loading" class="loading">加载中...</div>
+      <div v-if="error" class="error-box"><span>{{ displayError }}</span><button @click="error = ''">关闭</button></div>
     </section>
   </main>
 </template>

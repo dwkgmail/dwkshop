@@ -4,9 +4,9 @@
 
 body {
   margin: 0;
-  min-width: 1180px;
-  background: #f3f6fb;
-  color: #172033;
+  min-width: 960px;
+  background: #f4f6f8;
+  color: #1b2430;
   font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
 }
 
@@ -36,9 +36,7 @@ p {
   display: grid;
   place-items: center;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 75% 20%, rgba(255, 106, 0, 0.18), transparent 28%),
-    linear-gradient(135deg, #172033, #263245);
+  background: #202a36;
 }
 
 .login-card {
@@ -55,7 +53,7 @@ p {
 .login-brand {
   padding: 54px;
   color: #fff;
-  background: linear-gradient(135deg, #ff6a00, #ff9f1c);
+  background: #e95d00;
 }
 
 .login-brand span {
@@ -111,10 +109,10 @@ textarea {
 .sidebar {
   position: sticky;
   top: 0;
-  width: 228px;
+  width: 216px;
   height: 100vh;
   padding: 20px 16px;
-  background: #172033;
+  background: #202a36;
   color: #fff;
 }
 
@@ -140,7 +138,7 @@ nav button {
 
 nav button.active,
 nav button:hover {
-  background: #ff6a00;
+  background: #e95d00;
   color: #fff;
 }
 
@@ -148,14 +146,15 @@ nav button:hover {
   position: relative;
   flex: 1;
   min-width: 0;
-  padding: 24px 28px 42px;
+  padding: 22px 26px 42px;
 }
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  min-height: 58px;
+  margin-bottom: 18px;
 }
 
 .topbar h1 {
@@ -199,12 +198,12 @@ td,
 }
 
 .metrics strong {
-  color: #ff6a00;
+  color: #e95d00;
   font-size: 28px;
 }
 
 .panel {
-  padding: 18px;
+  padding: 16px;
 }
 
 .dashboard-grid,
@@ -253,7 +252,7 @@ table {
 th,
 td {
   border-bottom: 1px solid #edf0f4;
-  padding: 13px 10px;
+  padding: 12px 10px;
   text-align: left;
   vertical-align: middle;
   font-size: 14px;
@@ -262,7 +261,8 @@ td {
 th {
   color: #334155;
   font-weight: 700;
-  background: #f8fafc;
+  background: #f5f7f9;
+  white-space: nowrap;
 }
 
 .product-cell {
@@ -333,14 +333,14 @@ th {
 
 .primary {
   border: 0;
-  background: #ff6a00;
+  background: #e95d00;
   color: #fff;
 }
 
 .ghost {
-  border: 1px solid #ff6a00;
+  border: 1px solid #e95d00;
   background: #fff;
-  color: #ff6a00;
+  color: #e95d00;
 }
 
 .danger {
@@ -433,7 +433,7 @@ th {
 }
 
 .orange {
-  color: #ff6a00;
+  color: #e95d00;
 }
 
 .placeholder {
@@ -503,4 +503,47 @@ th {
   gap: 6px;
   color: #64748b;
   font-size: 13px;
+}
+
+button,
+input,
+select,
+textarea {
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 0;
+  border-color: #e95d00;
+  box-shadow: 0 0 0 3px rgba(233, 93, 0, 0.12);
+}
+
+tbody tr:hover {
+  background: #fafbfc;
+}
+
+@media (max-width: 1100px) {
+  .sidebar {
+    width: 190px;
+  }
+
+  .content {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filters {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
 }

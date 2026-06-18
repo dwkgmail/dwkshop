@@ -25,6 +25,10 @@ management:
       exposure:
         include: health,info
 
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} level=%-5level app=${spring.application.name} traceId=%X{traceId:-} thread=%thread logger=%logger{36} msg=%msg%n%ex{short}"
+
 dwkshop:
   auth:
     secret: ${DWKSHOP_AUTH_SECRET:dwkshop-local-dev-secret-change-me}

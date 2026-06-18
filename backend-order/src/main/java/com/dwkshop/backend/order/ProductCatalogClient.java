@@ -38,4 +38,15 @@ public class ProductCatalogClient {
             .bodyToMono(LockSkuStockResponse.class)
             .block();
     }
+
+    public LockSkuStockResponse releaseSkuStock(Long skuId, int quantity) {
+        return webClient.post()
+            .uri("/internal/products/skus/{skuId}/stock-releases", skuId)
+            .bodyValue(new LockSkuStockRequest(quantity))
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.createException()
+                .map(ex -> new ResponseStatusException(response.statusCode(), "Product stock release failed")))
+            .bodyToMono(LockSkuStockResponse.class)
+            .block();
+    }
 }

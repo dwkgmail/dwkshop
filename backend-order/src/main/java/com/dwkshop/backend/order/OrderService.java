@@ -46,6 +46,10 @@ public class OrderService {
     private static final String DELIVERY_SHIPPED = "SHIPPED";
     private static final String DELIVERY_IN_TRANSIT = "IN_TRANSIT";
     private static final String DELIVERY_DELIVERED = "DELIVERED";
+    private static final String AFTERSALE_NONE = "NONE";
+    private static final String AFTERSALE_APPLYING = "APPLYING";
+    private static final String AFTERSALE_REJECTED = "REJECTED";
+    private static final String AFTERSALE_REFUNDED = "REFUNDED";
 
     private final TradeOrderRepository tradeOrderRepository;
     private final TradeOrderItemRepository tradeOrderItemRepository;
@@ -235,6 +239,91 @@ public class OrderService {
         order.setUpdatedAt(now);
         tradeOrderRepository.save(order);
         return toOrderResponse(order);
+    }
+
+    @Transactional(readOnly = true)
+    public AftersaleOrderSnapshot getAftersaleSnapshot(Long orderId) {
+        TradeOrder order = tradeOrderRepository.findById(orderId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+        return toAftersaleSnapshot(order);
+    }
+
+    @Transactional
+    public AftersaleOrderSnapshot applyAftersale(Long orderId, Long userId) {
+        TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+        if (!"PAID".equals(order.getPayStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "只有已支付订单可以申请退款");
+        }
+        if (AFTERSALE_REFUNDED.equals(order.getOrderStatus()) || AFTERSALE_REFUNDED.equals(order.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已退款");
+        }
+        if (!AFTERSALE_NONE.equals(order.getAftersaleStatus()) && !AFTERSALE_REJECTED.equals(order.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已有处理中的售后申请");
+        }
+        List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
+        if (items.isEmpty() || items.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getSupportRefund()))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单不支持退款");
+        }
+        order.setAftersaleStatus(AFTERSALE_APPLYING);
+        order.setUpdatedAt(LocalDateTime.now());
+        return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
+    }
+
+    @Transactional
+    public AftersaleOrderSnapshot approveAftersale(Long orderId) {
+        TradeOrder order = tradeOrderRepository.findById(orderId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+        if (!AFTERSALE_APPLYING.equals(order.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单售后状态不是处理中");
+        }
+        List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
+        if ("WAIT_SHIP".equals(order.getOrderStatus())) {
+            for (TradeOrderItem item : items) {
+                productCatalogClient.releaseSkuStock(item.getSkuId(), item.getQuantity());
+            }
+        }
+        for (TradeOrderItem item : items) {
+            item.setAftersaleQuantity(item.getQuantity());
+        }
+        tradeOrderItemRepository.saveAll(items);
+        order.setOrderStatus(AFTERSALE_REFUNDED);
+        order.setPayStatus(AFTERSALE_REFUNDED);
+        order.setAftersaleStatus(AFTERSALE_REFUNDED);
+        order.setUpdatedAt(LocalDateTime.now());
+        return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
+    }
+
+    @Transactional
+    public AftersaleOrderSnapshot rejectAftersale(Long orderId) {
+        TradeOrder order = tradeOrderRepository.findById(orderId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+        if (!AFTERSALE_APPLYING.equals(order.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单售后状态不是处理中");
+        }
+        order.setAftersaleStatus(AFTERSALE_REJECTED);
+        order.setUpdatedAt(LocalDateTime.now());
+        return toAftersaleSnapshot(tradeOrderRepository.save(order));
+    }
+
+    private AftersaleOrderSnapshot toAftersaleSnapshot(TradeOrder order) {
+        return toAftersaleSnapshot(order, tradeOrderItemRepository.findByOrderId(order.getId()));
+    }
+
+    private AftersaleOrderSnapshot toAftersaleSnapshot(TradeOrder order, List<TradeOrderItem> items) {
+        boolean refundable = !items.isEmpty()
+            && items.stream().allMatch(item -> Boolean.TRUE.equals(item.getSupportRefund()));
+        return new AftersaleOrderSnapshot(
+            order.getId(),
+            order.getOrderNo(),
+            order.getUserId(),
+            order.getReceiverMobile(),
+            order.getOrderStatus(),
+            order.getPayStatus(),
+            order.getAftersaleStatus(),
+            order.getPayAmount(),
+            refundable
+        );
     }
 
     private SettlementCalculation calculate(Long userId, ConfirmOrderRequest request) {

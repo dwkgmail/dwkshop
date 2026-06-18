@@ -153,6 +153,27 @@ public class ProductService {
         );
     }
 
+    @Transactional
+    public LockSkuStockResponse releaseSkuStock(Long skuId, int quantity) {
+        ProductSku sku = productSkuRepository.findByIdForUpdate(skuId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格不存在"));
+        if (quantity <= 0 || sku.getLockedStock() < quantity) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "释放的锁定库存数量无效");
+        }
+        sku.setLockedStock(sku.getLockedStock() - quantity);
+        sku.setStock(sku.getStock() + quantity);
+        sku.setUpdatedAt(LocalDateTime.now());
+        ProductSku saved = productSkuRepository.save(sku);
+        return new LockSkuStockResponse(
+            saved.getId(),
+            saved.getSkuName(),
+            saved.getSalePrice(),
+            saved.getStock(),
+            saved.getLockedStock(),
+            saved.getSkuStatus()
+        );
+    }
+
     @Transactional(readOnly = true)
     public List<AdminProductResponse> listAdminProducts() {
         return toAdminProducts(productRepository.findByDeletedFlagFalseOrderByIdDesc());

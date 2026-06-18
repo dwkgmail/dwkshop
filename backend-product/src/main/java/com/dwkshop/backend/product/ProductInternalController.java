@@ -30,4 +30,9 @@ public class ProductInternalController {
     public LockSkuStockResponse lockSkuStock(@PathVariable Long skuId, @Valid @RequestBody LockSkuStockRequest request) {
         return productService.lockSkuStock(skuId, request.quantity());
     }
+
+    @PostMapping("/skus/{skuId}/stock-releases")
+    public LockSkuStockResponse releaseSkuStock(@PathVariable Long skuId, @Valid @RequestBody LockSkuStockRequest request) {
+        return productService.releaseSkuStock(skuId, request.quantity());
+    }
 }

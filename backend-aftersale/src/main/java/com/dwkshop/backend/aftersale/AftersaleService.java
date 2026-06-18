@@ -4,13 +4,7 @@ import com.dwkshop.backend.aftersale.dto.AftersaleResponse;
 import com.dwkshop.backend.aftersale.dto.CreateAftersaleRequest;
 import com.dwkshop.backend.aftersale.dto.RejectAftersaleRequest;
 import com.dwkshop.backend.domain.entity.AftersaleOrder;
-import com.dwkshop.backend.domain.entity.ProductSku;
-import com.dwkshop.backend.domain.entity.TradeOrder;
-import com.dwkshop.backend.domain.entity.TradeOrderItem;
 import com.dwkshop.backend.domain.repository.AftersaleOrderRepository;
-import com.dwkshop.backend.domain.repository.ProductSkuRepository;
-import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
-import com.dwkshop.backend.domain.repository.TradeOrderRepository;
 import com.dwkshop.backend.util.PriceFormatter;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -29,58 +23,38 @@ public class AftersaleService {
     private static final String REJECTED = "REJECTED";
 
     private final AftersaleOrderRepository aftersaleOrderRepository;
-    private final TradeOrderRepository tradeOrderRepository;
-    private final TradeOrderItemRepository tradeOrderItemRepository;
-    private final ProductSkuRepository productSkuRepository;
+    private final OrderClient orderClient;
 
     public AftersaleService(
         AftersaleOrderRepository aftersaleOrderRepository,
-        TradeOrderRepository tradeOrderRepository,
-        TradeOrderItemRepository tradeOrderItemRepository,
-        ProductSkuRepository productSkuRepository
+        OrderClient orderClient
     ) {
         this.aftersaleOrderRepository = aftersaleOrderRepository;
-        this.tradeOrderRepository = tradeOrderRepository;
-        this.tradeOrderItemRepository = tradeOrderItemRepository;
-        this.productSkuRepository = productSkuRepository;
+        this.orderClient = orderClient;
     }
 
     @Transactional
     public AftersaleResponse create(Long userId, CreateAftersaleRequest request) {
-        TradeOrder order = tradeOrderRepository.findByIdAndUserId(request.orderId(), userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
-        if (!"PAID".equals(order.getPayStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only paid orders can request refund");
-        }
-        if (REFUNDED.equals(order.getOrderStatus()) || REFUNDED.equals(order.getAftersaleStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order already refunded");
-        }
-        aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(order.getId(), List.of(APPLYING, REFUNDED))
+        aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(request.orderId(), List.of(APPLYING, REFUNDED))
             .ifPresent(item -> {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund request already exists");
             });
-        List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(order.getId());
-        if (items.isEmpty() || items.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getSupportRefund()))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order does not support refund");
-        }
+        AftersaleOrderSnapshot order = orderClient.applyAftersale(request.orderId(), userId);
 
         LocalDateTime now = LocalDateTime.now();
         AftersaleOrder aftersale = new AftersaleOrder();
         aftersale.setAftersaleNo("AS" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(now) + UUID.randomUUID().toString().substring(0, 6).toUpperCase());
-        aftersale.setOrderId(order.getId());
+        aftersale.setOrderId(order.id());
         aftersale.setUserId(userId);
         aftersale.setAftersaleType("REFUND");
         aftersale.setAftersaleStatus(APPLYING);
-        aftersale.setRefundAmount(order.getPayAmount());
+        aftersale.setRefundAmount(order.payAmount());
         aftersale.setReason(request.reason().trim());
         aftersale.setApplyTime(now);
         aftersale.setCreatedAt(now);
         aftersale.setUpdatedAt(now);
         AftersaleOrder saved = aftersaleOrderRepository.save(aftersale);
 
-        order.setAftersaleStatus(APPLYING);
-        order.setUpdatedAt(now);
-        tradeOrderRepository.save(order);
         return toResponse(saved, order);
     }
 
@@ -112,23 +86,9 @@ public class AftersaleService {
         if (!APPLYING.equals(aftersale.getAftersaleStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not applying");
         }
-        TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+        AftersaleOrderSnapshot order = orderClient.approveAftersale(aftersale.getOrderId());
 
         LocalDateTime now = LocalDateTime.now();
-        refundOrderStock(order);
-        List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(order.getId());
-        for (TradeOrderItem item : items) {
-            item.setAftersaleQuantity(item.getQuantity());
-            tradeOrderItemRepository.save(item);
-        }
-
-        order.setOrderStatus(REFUNDED);
-        order.setPayStatus(REFUNDED);
-        order.setAftersaleStatus(REFUNDED);
-        order.setUpdatedAt(now);
-        tradeOrderRepository.save(order);
-
         aftersale.setAftersaleStatus(REFUNDED);
         aftersale.setAuditTime(now);
         aftersale.setRefundTime(now);
@@ -144,8 +104,7 @@ public class AftersaleService {
         if (!APPLYING.equals(aftersale.getAftersaleStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not applying");
         }
-        TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+        AftersaleOrderSnapshot order = orderClient.rejectAftersale(aftersale.getOrderId());
 
         LocalDateTime now = LocalDateTime.now();
         aftersale.setAftersaleStatus(REJECTED);
@@ -154,39 +113,21 @@ public class AftersaleService {
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
 
-        order.setAftersaleStatus(REJECTED);
-        order.setUpdatedAt(now);
-        tradeOrderRepository.save(order);
         return toResponse(aftersale, order);
-    }
-
-    private void refundOrderStock(TradeOrder order) {
-        if (!"WAIT_SHIP".equals(order.getOrderStatus())) {
-            return;
-        }
-        for (TradeOrderItem item : tradeOrderItemRepository.findByOrderId(order.getId())) {
-            ProductSku sku = productSkuRepository.findByIdForUpdate(item.getSkuId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sku not found"));
-            sku.setLockedStock(Math.max(0, sku.getLockedStock() - item.getQuantity()));
-            sku.setStock(sku.getStock() + item.getQuantity());
-            sku.setUpdatedAt(LocalDateTime.now());
-            productSkuRepository.save(sku);
-        }
     }
 
     private AftersaleResponse toResponse(AftersaleOrder aftersale) {
-        TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId()).orElse(null);
-        return toResponse(aftersale, order);
+        return toResponse(aftersale, orderClient.getAftersaleSnapshot(aftersale.getOrderId()));
     }
 
-    private AftersaleResponse toResponse(AftersaleOrder aftersale, TradeOrder order) {
+    private AftersaleResponse toResponse(AftersaleOrder aftersale, AftersaleOrderSnapshot order) {
         return new AftersaleResponse(
             aftersale.getId(),
             aftersale.getAftersaleNo(),
             aftersale.getOrderId(),
-            order == null ? null : order.getOrderNo(),
+            order == null ? null : order.orderNo(),
             aftersale.getUserId(),
-            order == null ? null : order.getReceiverMobile(),
+            order == null ? null : order.receiverMobile(),
             aftersale.getAftersaleType(),
             aftersale.getAftersaleStatus(),
             aftersale.getRefundAmount(),

@@ -176,10 +176,10 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
+      DWKSHOP_ORDER_SERVICE_BASE_URL: http://order-service:18084
     depends_on:
       - auth-service
       - order-service
-      - product-service
 
 volumes:
   mysql_data:

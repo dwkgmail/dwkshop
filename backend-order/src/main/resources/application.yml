@@ -62,3 +62,6 @@ dwkshop:
     order-exchange: dwkshop.order.exchange
     order-created-queue: dwkshop.order.created
     order-created-routing-key: order.created
+    refund-exchange: dwkshop.refund.exchange
+    refund-approved-routing-key: refund.approved
+    refund-approved-order-queue: dwkshop.refund.approved.order

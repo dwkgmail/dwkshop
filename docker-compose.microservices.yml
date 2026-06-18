@@ -87,11 +87,13 @@ services:
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
       SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      SPRING_RABBITMQ_HOST: rabbitmq
       DWKSHOP_ES_URIS: http://elasticsearch:9200
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
     depends_on:
       - auth-service
       - elasticsearch
+      - rabbitmq
 
   cart-service:
     build:
@@ -183,11 +185,13 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/dwkshop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: dwkshop
       SPRING_DATASOURCE_PASSWORD: dwkshop
+      SPRING_RABBITMQ_HOST: rabbitmq
       DWKSHOP_ORDER_SERVICE_BASE_URL: http://order-service:18084
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
     depends_on:
       - auth-service
       - order-service
+      - rabbitmq
 
 volumes:
   mysql_data:

@@ -10,3 +10,7 @@ spring:
     open-in-view: false
   flyway:
     enabled: false
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false

@@ -12,7 +12,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
-import java.util.function.Supplier;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,30 +24,24 @@ public class AftersaleService {
     private static final String REFUNDED = "REFUNDED";
     private static final String REJECTED = "REJECTED";
     private static final String FLOW_PENDING = "PENDING";
-    private static final String FLOW_PROCESSING = "PROCESSING";
     private static final String FLOW_COMPLETED = "COMPLETED";
-    private static final String FLOW_COMPENSATED = "COMPENSATED";
-    private static final String FLOW_FAILED = "FAILED";
-    private static final String STEP_PRODUCT_RELEASE = "PRODUCT_RELEASE";
-    private static final String STEP_ORDER_COMPLETE = "ORDER_COMPLETE";
-    private static final String STEP_COMPENSATE_PRODUCT = "COMPENSATE_PRODUCT";
-    private static final int MAX_RETRY = 3;
+    private static final String STEP_EVENT_PENDING = "EVENT_PENDING";
 
     private final AftersaleOrderRepository aftersaleOrderRepository;
     private final AftersaleRefundFlowRepository refundFlowRepository;
     private final OrderClient orderClient;
-    private final ProductClient productClient;
+    private final RefundApprovedOutbox refundApprovedOutbox;
 
     public AftersaleService(
         AftersaleOrderRepository aftersaleOrderRepository,
         AftersaleRefundFlowRepository refundFlowRepository,
         OrderClient orderClient,
-        ProductClient productClient
+        RefundApprovedOutbox refundApprovedOutbox
     ) {
         this.aftersaleOrderRepository = aftersaleOrderRepository;
         this.refundFlowRepository = refundFlowRepository;
         this.orderClient = orderClient;
-        this.productClient = productClient;
+        this.refundApprovedOutbox = refundApprovedOutbox;
     }
 
     @Transactional
@@ -99,7 +92,7 @@ public class AftersaleService {
 
     @Transactional
     public AftersaleResponse approve(Long id) {
-        AftersaleOrder aftersale = aftersaleOrderRepository.findById(id)
+        AftersaleOrder aftersale = aftersaleOrderRepository.findByIdForUpdate(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
         if (REFUNDED.equals(aftersale.getAftersaleStatus())) {
             return toResponse(aftersale);
@@ -108,55 +101,19 @@ public class AftersaleService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not applying");
         }
 
-        AftersaleRefundFlow flow = loadOrCreateFlow(aftersale);
-        if (FLOW_COMPLETED.equals(flow.getFlowStatus()) || FLOW_COMPENSATED.equals(flow.getFlowStatus())) {
-            return toResponse(markRefunded(aftersale), orderClient.getAftersaleSnapshot(aftersale.getOrderId()));
+        RefundOrderContext orderContext = orderClient.getRefundContext(aftersale.getOrderId());
+        if (!Boolean.TRUE.equals(orderContext.refundable())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order is not refundable");
         }
-
-        flow.setFlowStatus(FLOW_PROCESSING);
-        flow.setCurrentStep(STEP_PRODUCT_RELEASE);
-        flow.setLastError(null);
-        flow.setUpdatedAt(LocalDateTime.now());
-        refundFlowRepository.save(flow);
-
-        RefundOrderContext orderContext = executeWithRetry("load refund context", () -> orderClient.getRefundContext(aftersale.getOrderId()));
-        List<RefundStockItemRequest> stockItems = orderContext.items().stream()
-            .filter(item -> Boolean.TRUE.equals(item.supportRefund()))
-            .map(item -> new RefundStockItemRequest(item.skuId(), item.quantity()))
-            .toList();
-        boolean productReleased = false;
-
-        try {
-            if ("WAIT_SHIP".equals(orderContext.orderStatus()) && !stockItems.isEmpty()) {
-                executeWithRetry("release refund stock", () -> productClient.releaseRefundStock(refundCommandNo(flow, "release"), stockItems));
-                productReleased = true;
-                flow.setCurrentStep(STEP_ORDER_COMPLETE);
-                flow.setUpdatedAt(LocalDateTime.now());
-                refundFlowRepository.save(flow);
-            }
-
-            AftersaleOrderSnapshot order = executeWithRetry("complete refund order", () -> orderClient.completeAftersale(aftersale.getOrderId()));
-            LocalDateTime now = LocalDateTime.now();
-            aftersale.setAftersaleStatus(REFUNDED);
-            aftersale.setAuditTime(now);
-            aftersale.setRefundTime(now);
-            aftersale.setUpdatedAt(now);
-            aftersaleOrderRepository.save(aftersale);
-            saveFlow(flow, FLOW_COMPLETED, STEP_ORDER_COMPLETE, flow.getRetryCount(), null);
-            return toResponse(aftersale, order);
-        } catch (RuntimeException ex) {
-            if (productReleased) {
-                try {
-                    executeWithRetry("compensate refund stock", () -> productClient.restoreRefundStock(refundCommandNo(flow, "compensate"), stockItems));
-                    saveFlow(flow, FLOW_COMPENSATED, STEP_COMPENSATE_PRODUCT, flow.getRetryCount(), null);
-                } catch (RuntimeException compensationEx) {
-                    saveFlow(flow, FLOW_FAILED, STEP_COMPENSATE_PRODUCT, incrementRetry(flow), trimError(compensationEx.getMessage()));
-                    throw compensationEx;
-                }
-            }
-            saveFlow(flow, FLOW_FAILED, STEP_ORDER_COMPLETE, incrementRetry(flow), trimError(ex.getMessage()));
-            throw ex;
-        }
+        LocalDateTime now = LocalDateTime.now();
+        aftersale.setAftersaleStatus(REFUNDED);
+        aftersale.setAuditTime(now);
+        aftersale.setRefundTime(now);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+        refundApprovedOutbox.append(aftersale, orderContext, now);
+        saveFlow(loadOrCreateFlow(aftersale), FLOW_COMPLETED, STEP_EVENT_PENDING, 0, null);
+        return toResponse(aftersale, approvedOrderSnapshot(orderContext));
     }
 
     @Transactional
@@ -241,48 +198,14 @@ public class AftersaleService {
         return refundFlowRepository.save(flow);
     }
 
-    private AftersaleOrder markRefunded(AftersaleOrder aftersale) {
-        aftersale.setAftersaleStatus(REFUNDED);
-        aftersale.setRefundTime(LocalDateTime.now());
-        aftersale.setUpdatedAt(LocalDateTime.now());
-        return aftersaleOrderRepository.save(aftersale);
-    }
-
-    private String refundCommandNo(AftersaleRefundFlow flow, String action) {
-        return flow.getAftersaleNo() + "-" + action.toUpperCase();
-    }
-
     private String refundCommandNo(String base, String action) {
         return base + "-" + action.toUpperCase();
     }
 
-    private int incrementRetry(AftersaleRefundFlow flow) {
-        int next = flow.getRetryCount() == null ? 1 : flow.getRetryCount() + 1;
-        if (next > MAX_RETRY) {
-            return MAX_RETRY;
-        }
-        return next;
-    }
-
-    private String trimError(String message) {
-        if (message == null) {
-            return null;
-        }
-        return message.length() <= 255 ? message : message.substring(0, 255);
-    }
-
-    private <T> T executeWithRetry(String action, Supplier<T> supplier) {
-        RuntimeException last = null;
-        for (int attempt = 1; attempt <= MAX_RETRY; attempt++) {
-            try {
-                return supplier.get();
-            } catch (RuntimeException ex) {
-                last = ex;
-                if (attempt == MAX_RETRY) {
-                    break;
-                }
-            }
-        }
-        throw last == null ? new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, action + " failed") : last;
+    private AftersaleOrderSnapshot approvedOrderSnapshot(RefundOrderContext context) {
+        return new AftersaleOrderSnapshot(
+            context.orderId(), context.orderNo(), context.userId(), null, "REFUNDED", "REFUNDED", "REFUNDED",
+            context.payAmount(), context.refundable()
+        );
     }
 }

@@ -4,6 +4,7 @@ import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.Queue;
+import java.util.Map;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -35,6 +36,35 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    DirectExchange refundExchange(@Value("${dwkshop.mq.refund-exchange}") String exchangeName) {
+        return new DirectExchange(exchangeName, true, false);
+    }
+
+    @Bean
+    Queue refundApprovedOrderQueue(@Value("${dwkshop.mq.refund-approved-order-queue}") String name,
+        @Value("${dwkshop.mq.refund-exchange}") String exchange) {
+        return new Queue(name, true, false, false, Map.of(
+            "x-dead-letter-exchange", exchange,
+            "x-dead-letter-routing-key", "refund.approved.order.dead"));
+    }
+
+    @Bean
+    Queue refundApprovedOrderDeadQueue(@Value("${dwkshop.mq.refund-approved-order-queue}") String name) {
+        return new Queue(name + ".dead", true);
+    }
+
+    @Bean
+    Binding refundApprovedOrderBinding(DirectExchange refundExchange, Queue refundApprovedOrderQueue,
+        @Value("${dwkshop.mq.refund-approved-routing-key}") String routingKey) {
+        return BindingBuilder.bind(refundApprovedOrderQueue).to(refundExchange).with(routingKey);
+    }
+
+    @Bean
+    Binding refundApprovedOrderDeadBinding(DirectExchange refundExchange, Queue refundApprovedOrderDeadQueue) {
+        return BindingBuilder.bind(refundApprovedOrderDeadQueue).to(refundExchange).with("refund.approved.order.dead");
+    }
+
+    @Bean
     Jackson2JsonMessageConverter jackson2JsonMessageConverter() {
         return new Jackson2JsonMessageConverter();
     }
@@ -56,6 +86,7 @@ public class RabbitMqConfig {
         factory.setConnectionFactory(connectionFactory);
         factory.setMessageConverter(messageConverter);
         factory.setAutoStartup(autoStartup);
+        factory.setDefaultRequeueRejected(false);
         return factory;
     }
 }

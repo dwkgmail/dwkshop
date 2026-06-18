@@ -4,19 +4,17 @@ import com.dwkshop.backend.aftersale.AftersaleOrderSnapshot;
 import com.dwkshop.backend.aftersale.OrderClient;
 import com.dwkshop.backend.aftersale.ProductClient;
 import com.dwkshop.backend.aftersale.RefundOrderContext;
-import com.dwkshop.backend.aftersale.RefundStockItemRequest;
-import com.dwkshop.backend.aftersale.RefundStockItemResponse;
-import com.dwkshop.backend.aftersale.RefundStockResponse;
 import com.dwkshop.backend.auth.AuthTokenService;
 import com.dwkshop.backend.domain.entity.AftersaleOrder;
 import com.dwkshop.backend.domain.entity.AftersaleRefundFlow;
+import com.dwkshop.backend.domain.entity.AftersaleOutboxEvent;
 import com.dwkshop.backend.domain.repository.AftersaleOrderRepository;
 import com.dwkshop.backend.domain.repository.AftersaleRefundFlowRepository;
+import com.dwkshop.backend.domain.repository.AftersaleOutboxEventRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,9 +23,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
@@ -44,6 +39,7 @@ class AftersaleServiceIntegrationTest {
     private final MockMvc mockMvc;
     private final AftersaleOrderRepository aftersaleOrderRepository;
     private final AftersaleRefundFlowRepository refundFlowRepository;
+    private final AftersaleOutboxEventRepository outboxEventRepository;
     private final AuthTokenService authTokenService;
 
     @MockBean
@@ -57,16 +53,19 @@ class AftersaleServiceIntegrationTest {
         MockMvc mockMvc,
         AftersaleOrderRepository aftersaleOrderRepository,
         AftersaleRefundFlowRepository refundFlowRepository,
+        AftersaleOutboxEventRepository outboxEventRepository,
         AuthTokenService authTokenService
     ) {
         this.mockMvc = mockMvc;
         this.aftersaleOrderRepository = aftersaleOrderRepository;
         this.refundFlowRepository = refundFlowRepository;
+        this.outboxEventRepository = outboxEventRepository;
         this.authTokenService = authTokenService;
     }
 
     @BeforeEach
     void resetState() {
+        outboxEventRepository.deleteAllInBatch();
         refundFlowRepository.deleteAllInBatch();
         aftersaleOrderRepository.deleteAllInBatch();
     }
@@ -89,17 +88,6 @@ class AftersaleServiceIntegrationTest {
                 true,
                 List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(501L, 101L, 2, true))
             )
-        );
-        when(productClient.releaseRefundStock(anyString(), anyList())).thenReturn(
-            new RefundStockResponse(
-                "refund-flow-001",
-                "RELEASE",
-                "DONE",
-                List.of(new RefundStockItemResponse(501L, "Default", 8, 0, "ENABLED", 2, 2, -2))
-            )
-        );
-        when(orderClient.completeAftersale(100L)).thenReturn(
-            new AftersaleOrderSnapshot(100L, "SO202606180100", 1L, "13800000000", "REFUNDED", "REFUNDED", "REFUNDED", 19900, true)
         );
 
         mockMvc.perform(post("/api/aftersales")
@@ -126,17 +114,14 @@ class AftersaleServiceIntegrationTest {
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
             .andExpect(jsonPath("$.refundTime").isNotEmpty());
 
-        ArgumentCaptor<String> commandNoCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<List<RefundStockItemRequest>> itemsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(productClient).releaseRefundStock(commandNoCaptor.capture(), itemsCaptor.capture());
-        assertThat(commandNoCaptor.getValue()).contains(created.getAftersaleNo()).contains("RELEASE");
-        assertThat(itemsCaptor.getValue()).hasSize(1);
-        assertThat(itemsCaptor.getValue().get(0).skuId()).isEqualTo(501L);
-        assertThat(itemsCaptor.getValue().get(0).quantity()).isEqualTo(2);
+        AftersaleOutboxEvent outbox = outboxEventRepository.findAll().get(0);
+        assertThat(outbox.getPublishStatus()).isEqualTo("PENDING");
+        assertThat(outbox.getEventType()).isEqualTo("REFUND_APPROVED");
+        assertThat(outbox.getPayloadJson()).contains(created.getAftersaleNo()).contains("\"skuId\":501").contains("\"quantity\":2");
 
         AftersaleRefundFlow flow = refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow();
         assertThat(flow.getFlowStatus()).isEqualTo("COMPLETED");
-        assertThat(flow.getCurrentStep()).isEqualTo("ORDER_COMPLETE");
+        assertThat(flow.getCurrentStep()).isEqualTo("EVENT_PENDING");
         assertThat(flow.getRetryCount()).isEqualTo(0);
 
         mockMvc.perform(get("/api/aftersales/{id}", created.getId()))

@@ -24,6 +24,11 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: dwkshop
+    password: dwkshop
 
 management:
   endpoints:
@@ -45,3 +50,7 @@ dwkshop:
     elasticsearch:
       enabled: ${DWKSHOP_ES_ENABLED:true}
       index-name: ${DWKSHOP_ES_PRODUCT_INDEX:dwkshop_products}
+  mq:
+    refund-exchange: dwkshop.refund.exchange
+    refund-approved-routing-key: refund.approved
+    refund-approved-product-queue: dwkshop.refund.approved.product

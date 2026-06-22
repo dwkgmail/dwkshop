@@ -7,11 +7,11 @@ relationship and not a database foreign key.
 | Schema | Owner | Tables | External identifiers (no FK) |
 | --- | --- | --- | --- |
 | `dwkshop_auth` | auth-service | `user`, `admin_user` | none |
-| `dwkshop_product` | product-service | `product_category`, `product`, `product_sku`, `product_notice`, `product_refund_command` | none |
+| `dwkshop_product` | product-service | `product_category`, `product`, `product_sku`, `product_notice`, `product_refund_command`, `inventory_order_item_state`, `inventory_consumed_event` | none |
 | `dwkshop_cart` | cart-service | `cart_item` | `user_id`, `product_id`, `sku_id` |
 | `dwkshop_member` | member-service | `user_address`, `user_point_account`, `user_point_flow` | `user_id`, `biz_id` |
 | `dwkshop_marketing` | marketing-service | `coupon`, `coupon_user` | `user_id`, `order_id` |
-| `dwkshop_order` | order-service | `trade_order`, `trade_order_item`, `trade_order_amount` | `user_id`, `product_id`, `sku_id` |
+| `dwkshop_order` | order-service | `trade_order`, `trade_order_item`, `trade_order_amount`, `order_outbox_event` | `user_id`, `product_id`, `sku_id` |
 | `dwkshop_aftersale` | aftersale-service | `aftersale_order`, `aftersale_refund_flow`, `aftersale_outbox_event` | `order_id`, `user_id` |
 
 Foreign keys are retained only inside one owner/schema. Cross-service consistency
@@ -37,3 +37,7 @@ restricted `dwkshop` account and connect only to their owned schema.
 - Every `@Table` in an extracted service must occur in exactly one row above.
 - SQL foreign keys in split schemas may reference only tables in that same schema.
 - Services may exchange external identifiers, but resolve them through APIs/events.
+
+These gates are executable in `DatabaseOwnershipTest` and run with the root Maven
+test lifecycle. The test parses this table directly; do not maintain a second
+ownership list in code.

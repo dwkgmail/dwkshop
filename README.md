@@ -79,6 +79,74 @@ Docker Compose 默认只把网关和中间件端口暴露到宿主机；业务�
 | RabbitMQ | product、order、aftersale | `dwkshop/dwkshop`，控制台 `http://localhost:15672` |
 | Elasticsearch | product-service | `http://localhost:9200`，本地关闭安全认证 |
 
+## 生产/准生产部署注意事项
+
+仓库中的 Compose 配置和 `application.yml` 默认值仅用于本地开发，不能原样用于生产或准生产。部署前至少完成以下检查：
+
+- 通过部署平台的 Secret、环境变量或外部配置中心注入密码和密钥，不要把真实凭据写入 Compose、镜像、启动脚本或仓库。
+- 替换 MySQL、RabbitMQ、Redis、Elasticsearch、测试用户和后台管理员的全部默认密码；生产环境不要保留 `root/root`、`dwkshop/dwkshop`、`user123`、`admin123` 以及示例共享密钥。
+- `DWKSHOP_AUTH_SECRET` 必须是足够长的随机值，并在所有签发或校验 Token 的服务间保持一致；`DWKSHOP_INTERNAL_SECRET` 也必须随机生成，并在网关和全部业务服务间保持一致。两个密钥不能相同。
+- 只对外暴露网关或上层反向代理。MySQL、Redis、RabbitMQ、Elasticsearch、Actuator 和各业务服务端口应限制在内网或容器网络中，并在入口层配置 TLS、访问控制、超时和请求体大小限制。
+- 上线前备份 MySQL 和 Elasticsearch 数据，先运行一次性 `db-migrator`，确认状态码为 `0` 后再滚动启动 runtime 服务；不要让 runtime 服务自行执行 Flyway。
+
+### 环境变量清单
+
+下表列出部署时常用且需要显式管理的变量。Spring Boot 标准变量可以直接覆盖相应的 `application.yml` 配置。
+
+| 类别 | 环境变量 | 使用方/说明 |
+| --- | --- | --- |
+| MySQL 迁移 | `SPRING_DATASOURCE_URL`、`DWKSHOP_MIGRATOR_USERNAME`、`DWKSHOP_MIGRATOR_PASSWORD` | 仅 `db-migrator`；账号需要建库、建表和授权能力 |
+| MySQL runtime | `SPRING_DATASOURCE_URL`、`SPRING_DATASOURCE_USERNAME`、`SPRING_DATASOURCE_PASSWORD` | auth、product、cart、member、marketing、order、aftersale；每个服务指向自己的 schema |
+| 鉴权 | `DWKSHOP_AUTH_SECRET` | 所有签发或校验 Token 的服务使用同一个高强度随机值 |
+| 内部调用 | `DWKSHOP_INTERNAL_SECRET` | 网关及所有业务服务使用同一个高强度随机值 |
+| RabbitMQ | `SPRING_RABBITMQ_HOST`、`SPRING_RABBITMQ_PORT`、`SPRING_RABBITMQ_USERNAME`、`SPRING_RABBITMQ_PASSWORD` | product、order、aftersale；账号需有目标 vhost、exchange 和 queue 权限 |
+| Redis | `SPRING_DATA_REDIS_HOST`、`SPRING_DATA_REDIS_PORT`、`SPRING_DATA_REDIS_PASSWORD` | order-service；生产建议启用认证和 TLS/内网隔离 |
+| Elasticsearch | `DWKSHOP_ES_ENABLED`、`DWKSHOP_ES_URIS`、`SPRING_ELASTICSEARCH_USERNAME`、`SPRING_ELASTICSEARCH_PASSWORD` | product-service；当前商品索引名为 `dwkshop_products` |
+| 服务发现/地址 | `DWKSHOP_*_SERVICE_URI`、`DWKSHOP_*_SERVICE_BASE_URL` | 网关路由和服务间 HTTP 调用；完整名称见 `docker-compose.microservices.yml` |
+| 监听端口 | `SERVER_PORT` | 各业务服务；通常无需对宿主机或公网暴露 |
+
+### 数据库账号权限
+
+MySQL `root` 或等价的管理账号只交给一次性 `db-migrator`，不要注入网关或任何 runtime 服务。生产环境建议为每个服务创建独立账号，仅授予其所属 schema 所需的 DML 权限；若暂时共用 runtime 账号，也必须移除建库、授权、用户管理和访问其他业务 schema 的权限。迁移账号和 runtime 账号应分别轮换、审计和保存。
+
+### RabbitMQ 与 Elasticsearch
+
+RabbitMQ 不要使用本地默认账号。建议为应用创建独立 vhost 和最小权限用户，限制 configure/write/read 范围；管理控制台 `15672` 不应暴露公网。服务端和客户端应同时配置用户名、密码，跨主机通信建议启用 TLS。
+
+当前本地 Elasticsearch 设置了 `xpack.security.enabled=false`，该配置不得用于生产或准生产。部署时应启用 Elasticsearch 安全功能和 TLS，创建只允许 product-service 读写商品索引的账号，并限制 `9200`、`9300` 仅在受信网络可达。启用认证后，通过 `SPRING_ELASTICSEARCH_USERNAME` 和 `SPRING_ELASTICSEARCH_PASSWORD` 注入凭据。
+
+### Maven mirror
+
+公司 Nexus/Artifactory 地址、镜像账号和 Token 应放在开发机或 CI 的 Maven `settings.xml` 中，由 CI Secret 注入。不要把包含 `<mirrors>`、`<servers>` 或明文凭据的个人/公司 `settings.xml` 提交到仓库，也不要为了使用私服修改项目 `pom.xml` 写入私有凭据。
+
+### 重建 Elasticsearch 商品索引
+
+product-service 在启动完成后会从 MySQL 全量写入现有商品。确认 MySQL 是权威数据源并做好备份后，可删除商品索引并重启服务：
+
+```bash
+curl -X DELETE "http://localhost:9200/dwkshop_products"
+docker compose -f docker-compose.microservices.yml restart product-service
+```
+
+启用 Elasticsearch 认证或 TLS 时，请相应改用 HTTPS 并提供认证信息。重启后检查 product-service 日志，再通过 `/api/search/products?keyword=<关键词>` 验证搜索结果。删除索引到重建完成之间搜索可能暂时降级到数据库，不要在高峰期直接操作生产索引。
+
+### 清理本地环境
+
+仅停止并删除容器、保留中间件数据卷：
+
+```bash
+docker compose -f docker-compose.microservices.yml down --remove-orphans
+```
+
+彻底清空本地 MySQL、Redis、RabbitMQ 和 Elasticsearch 数据并重新初始化：
+
+```bash
+docker compose -f docker-compose.microservices.yml down -v --remove-orphans
+docker compose -f docker-compose.microservices.yml up --build
+```
+
+`down -v` 会永久删除该 Compose 项目的本地数据卷，只能用于确认无需保留数据的开发环境，禁止作为生产清理命令。
+
 ## 单体兼容模式（legacy）
 
 `backend` 目录仍保留可运行的单体应用，仅用于兼容、回归或拆分期间排查问题；日常开发和联调优先使用微服务模式。先启动全部中间件，再启动单体：

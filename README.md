@@ -1,23 +1,26 @@
 # DWK Shop MVP
 
-DWK Shop 是一个电商 MVP 练习项目，包含 Spring Boot 后端、Vue 3 移动端和 Vue 3 管理后台。当前版本已经打通商品浏览、购物车、确认订单、提交订单、订单查看，以及后台商品和订单管理的基础流程。
+DWK Shop 是一个电商 MVP 练习项目，包含 Spring Boot 多模块微服务后端、Vue 3 移动端和 Vue 3 管理后台。当前版本已经打通商品浏览、购物车、确认订单、提交订单、订单查看，以及后台商品和订单管理的基础流程。
 
 ## 项目结构
 
 ```text
 .
-├── backend             # Spring Boot 后端服务
-├── frontend-mobile     # Vue 3 用户端
-├── frontend-admin      # Vue 3 管理后台
-├── docs                # 设计与需求文档
-└── docker-compose.yml  # 本地 MySQL 依赖
+├── backend-*                        # 网关、迁移器、公共模块及各业务微服务
+├── backend                          # legacy 单体后端（兼容模式）
+├── frontend-mobile                  # Vue 3 用户端
+├── frontend-admin                   # Vue 3 管理后台
+├── docs                             # 设计、需求及微服务拆分文档
+├── pom.xml                          # Maven 多模块聚合 POM
+├── docker-compose.yml               # MySQL、Redis、RabbitMQ、Elasticsearch
+└── docker-compose.microservices.yml # 完整微服务编排
 ```
 
 ## 技术栈
 
-- 后端：Java 21、Spring Boot 3.3、Spring Web、Spring Data JPA、Flyway、MySQL 8.4
+- 后端：Java 21、Spring Boot 3.3、Spring Cloud Gateway、Spring Data JPA、Flyway
 - 前端：Vue 3、TypeScript、Vite
-- 本地依赖：Docker Compose、MySQL
+- 本地依赖：Docker Compose、MySQL 8.4、Redis 7.4、RabbitMQ 4.0、Elasticsearch 8.15
 
 ## 环境要求
 
@@ -26,15 +29,67 @@ DWK Shop 是一个电商 MVP 练习项目，包含 Spring Boot 后端、Vue 3 �
 - Node.js 20+
 - Docker Desktop
 
-## 快速启动
+## 快速启动（推荐：微服务模式）
 
-### 1. 启动 MySQL
+从仓库根目录构建并启动数据库迁移器、API 网关和全部业务服务：
 
 ```bash
-docker compose up -d mysql
+docker compose -f docker-compose.microservices.yml up --build
 ```
 
-默认连接信息：
+首次启动需要构建所有后端镜像，耗时会比后续启动长。`db-migrator` 会等待 MySQL 就绪，执行完 Flyway 迁移后退出；其他服务随后启动。
+
+启动完成后可通过网关检查服务：
+
+```bash
+curl http://localhost:8080/api/health
+```
+
+前端继续访问 `http://localhost:8080`，无需感知后端服务拆分。停止并清理容器：
+
+```bash
+docker compose -f docker-compose.microservices.yml down
+```
+
+### 服务端口
+
+Docker Compose 默认只把网关和中间件端口暴露到宿主机；业务服务端口用于容器间调用。
+
+| 组件 | 端口 | 说明 |
+| --- | ---: | --- |
+| API Gateway | `8080` | 前端及外部 API 的统一入口 |
+| auth-service | `18081` | 登录、鉴权、健康检查 |
+| product-service | `18082` | 商品、分类和搜索 |
+| cart-service | `18083` | 购物车 |
+| order-service | `18084` | 订单和结算 |
+| aftersale-service | `18085` | 售后 |
+| member-service | `18086` | 会员、地址和积分，内部服务 |
+| marketing-service | `18087` | 优惠券，内部服务 |
+| MySQL | `3306` | 业务数据及各服务独立 schema |
+| Redis | `6379` | 订单结算等临时数据 |
+| RabbitMQ | `5672` | 服务间事件；管理控制台为 `15672` |
+| Elasticsearch | `9200` | 商品搜索；传输端口为 `9300` |
+
+### 依赖中间件
+
+| 中间件 | 使用方 | 本地默认信息 |
+| --- | --- | --- |
+| MySQL | 迁移器及所有持久化服务 | `root/root`；应用账号 `dwkshop/dwkshop` |
+| Redis | order-service | `localhost:6379`，无密码 |
+| RabbitMQ | product、order、aftersale | `dwkshop/dwkshop`，控制台 `http://localhost:15672` |
+| Elasticsearch | product-service | `http://localhost:9200`，本地关闭安全认证 |
+
+## 单体兼容模式（legacy）
+
+`backend` 目录仍保留可运行的单体应用，仅用于兼容、回归或拆分期间排查问题；日常开发和联调优先使用微服务模式。先启动全部中间件，再启动单体：
+
+```bash
+docker compose up -d mysql redis rabbitmq elasticsearch
+cd backend
+mvn spring-boot:run
+```
+
+单体同样监听 `8080`，不要与微服务网关同时启动。其默认数据库连接信息为：
 
 | 配置 | 值 |
 | --- | --- |
@@ -44,22 +99,9 @@ docker compose up -d mysql
 | Username | `dwkshop` |
 | Password | `dwkshop` |
 
-### 2. 启动后端
+## 启动前端
 
-```bash
-cd backend
-mvn spring-boot:run
-```
-
-健康检查：
-
-```bash
-curl http://localhost:8080/api/health
-```
-
-后端默认端口为 `8080`。启动时会通过 Flyway 自动执行数据库迁移和初始化数据。
-
-### 3. 启动用户端
+### 用户端
 
 ```bash
 cd frontend-mobile
@@ -71,7 +113,7 @@ npm run dev
 
 用户端 Vite 会把 `/api` 代理到 `http://localhost:8080`。
 
-### 4. 启动管理后台
+### 管理后台
 
 ```bash
 cd frontend-admin
@@ -88,12 +130,13 @@ npm run dev
 
 ## 常用命令
 
-后端测试：
+后端测试应优先从仓库根目录执行，以便 Maven 一次解析并测试所有微服务模块：
 
 ```bash
-cd backend
 mvn test
 ```
+
+仅回归 legacy 单体时，可执行 `mvn -f backend/pom.xml test`。
 
 用户端构建：
 
@@ -108,6 +151,28 @@ npm run build
 cd frontend-admin
 npm run build
 ```
+
+## 常见问题
+
+### `db-migrator` 正常退出是否表示启动失败？
+
+不是。迁移器是一次性任务，成功执行迁移并以状态码 `0` 退出是预期行为。
+
+### 为什么业务服务无法从宿主机通过 `18081` 至 `18087` 访问？
+
+微服务编排只暴露统一网关 `8080`。业务端口用于 Compose 网络内部调用；本地调试单个服务时，可直接用 Maven 启动该模块，或临时在 Compose 中增加端口映射。
+
+### 网关返回 `502 Bad Gateway` 怎么排查？
+
+先运行 `docker compose -f docker-compose.microservices.yml ps`，确认对应业务服务正在运行；再用 `docker compose -f docker-compose.microservices.yml logs <service-name>` 查看服务是否因数据库迁移、端口占用或中间件连接失败退出。
+
+### 修改了数据库迁移后为什么没有重新执行？
+
+Flyway 只执行尚未登记的版本迁移。不要修改已执行的迁移文件；应在 `backend-migrator/src/main/resources/db/migration` 中新增更高版本脚本。仅在确认不需要保留本地数据时，才使用 `docker compose -f docker-compose.microservices.yml down -v` 删除数据卷后重建。
+
+### `8080` 端口被占用怎么办？
+
+确认没有同时运行 legacy 单体和微服务网关。两者默认都监听 `8080`，本地只能启动其中一种。
 
 ## 已实现功能
 
@@ -135,12 +200,11 @@ npm run build
 
 ## 数据库
 
-数据库结构和初始化数据由 Flyway 管理，迁移文件位于：
+数据库结构和初始化数据由 `backend-migrator` 统一通过 Flyway 管理，迁移目录为：
 
-- `backend/src/main/resources/db/migration/V1__create_mvp_tables.sql`
-- `backend/src/main/resources/db/migration/V2__seed_mvp_data.sql`
-- `backend/src/main/resources/db/migration/V3__add_product_notice.sql`
-- `backend/src/main/resources/db/migration/V4__add_login_accounts.sql`
+- `backend-migrator/src/main/resources/db/migration`
+
+微服务模式下，各业务服务不自行执行迁移。新增或调整数据库结构时，应在该目录中增加新的版本化迁移脚本；不要继续向 legacy 的 `backend/src/main/resources/db/migration` 添加迁移。
 
 主要数据表：
 
@@ -285,4 +349,6 @@ SKU 库存为 `0` 或 SKU 禁用时，接口返回 `selectable=false`。
 ## 相关文档
 
 - `docs/design-mvp.md`
+- `docs/microservices-split.md`
+- `docs/database-ownership.md`
 - `电商系统设计稿_完整版.docx`

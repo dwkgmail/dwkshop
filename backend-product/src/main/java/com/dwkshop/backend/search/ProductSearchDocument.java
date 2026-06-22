@@ -1,6 +1,5 @@
 package com.dwkshop.backend.search;
 
-import java.time.LocalDateTime;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -36,6 +35,6 @@ public class ProductSearchDocument {
     @Field(type = FieldType.Boolean)
     private Boolean deletedFlag;
 
-    @Field(type = FieldType.Date)
-    private LocalDateTime updatedAt;
+    @Field(type = FieldType.Keyword)
+    private String updatedAt;
 }

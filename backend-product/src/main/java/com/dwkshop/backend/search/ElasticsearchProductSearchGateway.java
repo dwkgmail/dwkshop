@@ -1,6 +1,7 @@
 package com.dwkshop.backend.search;
 
 import com.dwkshop.backend.domain.entity.Product;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
@@ -66,7 +67,9 @@ public class ElasticsearchProductSearchGateway implements ProductSearchGateway {
         document.setSubtitle(product.getSubtitle());
         document.setSaleStatus(product.getSaleStatus());
         document.setDeletedFlag(product.getDeletedFlag());
-        document.setUpdatedAt(product.getUpdatedAt());
+        document.setUpdatedAt(product.getUpdatedAt() == null
+            ? null
+            : DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(product.getUpdatedAt()));
         return document;
     }
 }

@@ -6,6 +6,7 @@ import com.dwkshop.backend.domain.entity.TradeOrderItem;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
+import com.dwkshop.backend.event.InventoryIntegrationEvent;
 import com.dwkshop.backend.order.dto.AdminShipOrderRequest;
 import com.dwkshop.backend.order.dto.AdminUpdateDeliveryStatusRequest;
 import com.dwkshop.backend.order.dto.ConfirmCouponResponse;
@@ -26,7 +27,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,7 +59,7 @@ public class OrderService {
     private final MemberClient memberClient;
     private final MarketingClient marketingClient;
     private final ProductCatalogClient productCatalogClient;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OrderInventoryOutbox inventoryOutbox;
     private final Duration settlementTtl;
 
     public OrderService(
@@ -71,7 +71,7 @@ public class OrderService {
         MemberClient memberClient,
         MarketingClient marketingClient,
         ProductCatalogClient productCatalogClient,
-        ApplicationEventPublisher eventPublisher,
+        OrderInventoryOutbox inventoryOutbox,
         @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
         this.tradeOrderRepository = tradeOrderRepository;
@@ -82,7 +82,7 @@ public class OrderService {
         this.memberClient = memberClient;
         this.marketingClient = marketingClient;
         this.productCatalogClient = productCatalogClient;
-        this.eventPublisher = eventPublisher;
+        this.inventoryOutbox = inventoryOutbox;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
     }
 
@@ -117,15 +117,7 @@ public class OrderService {
             if (!session.expectedPayAmount().equals(request.expectedPayAmount())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单金额已变化，请重新确认");
             }
-            OrderResponse order = persistOrder(userId, session.request(), calculation, request.remark());
-            eventPublisher.publishEvent(new OrderCreatedEvent(
-                order.id(),
-                order.orderNo(),
-                order.userId(),
-                order.payAmount(),
-                order.createdAt()
-            ));
-            return order;
+            return persistOrder(userId, session.request(), calculation, request.remark());
         }
     }
 
@@ -169,6 +161,8 @@ public class OrderService {
         order.setCancelTime(LocalDateTime.now());
         order.setUpdatedAt(LocalDateTime.now());
         tradeOrderRepository.save(order);
+        inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
+            InventoryIntegrationEvent.ORDER_CANCELLED, 2, order.getCancelTime());
         return toOrderResponse(order);
     }
 
@@ -189,6 +183,8 @@ public class OrderService {
             order.setCancelTime(now);
             order.setUpdatedAt(now);
             tradeOrderRepository.save(order);
+            inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
+                InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单支付已超时");
         }
         order.setOrderStatus("WAIT_SHIP");
@@ -473,17 +469,16 @@ public class OrderService {
         order.setUpdatedAt(now);
         TradeOrder savedOrder = tradeOrderRepository.save(order);
 
+        List<TradeOrderItem> savedItems = new java.util.ArrayList<>();
         for (SettlementItem item : calculation.items()) {
-            LockSkuStockResponse lockedSku = productCatalogClient.lockSkuStock(item.sku().skuId(), item.quantity());
-
             TradeOrderItem orderItem = new TradeOrderItem();
             orderItem.setOrderId(savedOrder.getId());
             orderItem.setProductId(item.sku().productId());
-            orderItem.setSkuId(lockedSku.skuId());
+            orderItem.setSkuId(item.sku().skuId());
             orderItem.setProductName(item.sku().productName());
-            orderItem.setSkuName(lockedSku.skuName());
+            orderItem.setSkuName(item.sku().skuName());
             orderItem.setProductImageUrl(item.sku().productImageUrl());
-            orderItem.setSalePrice(lockedSku.salePrice());
+            orderItem.setSalePrice(item.sku().salePrice());
             orderItem.setQuantity(item.quantity());
             orderItem.setTotalAmount(item.totalAmount());
             orderItem.setDiscountAmount(0);
@@ -491,7 +486,7 @@ public class OrderService {
             orderItem.setSupportRefund(true);
             orderItem.setAftersaleQuantity(0);
             orderItem.setCreatedAt(now);
-            tradeOrderItemRepository.save(orderItem);
+            savedItems.add(tradeOrderItemRepository.save(orderItem));
         }
 
         TradeOrderAmount amount = new TradeOrderAmount();
@@ -505,6 +500,8 @@ public class OrderService {
         amount.setPayAmount(calculation.amount().payAmount());
         amount.setCreatedAt(now);
         tradeOrderAmountRepository.save(amount);
+
+        inventoryOutbox.append(savedOrder, savedItems, InventoryIntegrationEvent.ORDER_CREATED, 1, now);
 
         if (calculation.selectedUserCouponId() != null) {
             marketingClient.useCoupon(userId, calculation.selectedUserCouponId(), savedOrder.getId());

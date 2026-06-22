@@ -1,8 +1,7 @@
 package com.dwkshop.backend.product;
 
 import com.dwkshop.backend.event.RefundApprovedEvent;
-import com.dwkshop.backend.product.dto.RefundStockItemRequest;
-import com.dwkshop.backend.product.dto.RefundStockRequest;
+import com.dwkshop.backend.event.InventoryIntegrationEvent;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -10,10 +9,10 @@ import org.springframework.stereotype.Component;
 @Component
 @Profile("!test")
 public class RefundApprovedConsumer {
-    private final ProductService productService;
+    private final InventoryIntegrationEventConsumer inventoryConsumer;
 
-    public RefundApprovedConsumer(ProductService productService) {
-        this.productService = productService;
+    public RefundApprovedConsumer(InventoryIntegrationEventConsumer inventoryConsumer) {
+        this.inventoryConsumer = inventoryConsumer;
     }
 
     @RabbitListener(queues = "${dwkshop.mq.refund-approved-product-queue}")
@@ -21,9 +20,9 @@ public class RefundApprovedConsumer {
         if (event.items() == null || event.items().isEmpty()) {
             return;
         }
-        productService.releaseRefundStock(new RefundStockRequest(
-            event.commandNo(), "RELEASE",
-            event.items().stream().map(item -> new RefundStockItemRequest(item.skuId(), item.quantity())).toList()
-        ));
+        inventoryConsumer.consume(new InventoryIntegrationEvent(
+            event.eventId(), InventoryIntegrationEvent.REFUND_APPROVED, 3, event.orderId(),
+            event.aftersaleNo(), event.approvedAt(), event.items().stream()
+                .map(item -> new InventoryIntegrationEvent.Item(item.skuId(), item.quantity())).toList()));
     }
 }

@@ -21,6 +21,8 @@ spring:
     port: 5672
     username: dwkshop
     password: dwkshop
+    publisher-confirm-type: correlated
+    publisher-returns: true
   flyway:
     enabled: false
   jpa:
@@ -59,9 +61,7 @@ dwkshop:
     product:
       base-url: ${DWKSHOP_PRODUCT_SERVICE_BASE_URL:http://localhost:18082}
   mq:
-    order-exchange: dwkshop.order.exchange
-    order-created-queue: dwkshop.order.created
-    order-created-routing-key: order.created
+    inventory-exchange: dwkshop.inventory.exchange
     refund-exchange: dwkshop.refund.exchange
     refund-approved-routing-key: refund.approved
     refund-approved-order-queue: dwkshop.refund.approved.order

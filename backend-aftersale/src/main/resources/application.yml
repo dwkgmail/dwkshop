@@ -25,6 +25,8 @@ spring:
     password: dwkshop
     publisher-confirm-type: correlated
     publisher-returns: true
+    publisher-confirm-type: correlated
+    publisher-returns: true
 
 management:
   endpoints:

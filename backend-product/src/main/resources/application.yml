@@ -51,6 +51,8 @@ dwkshop:
       enabled: ${DWKSHOP_ES_ENABLED:true}
       index-name: ${DWKSHOP_ES_PRODUCT_INDEX:dwkshop_products}
   mq:
+    inventory-exchange: dwkshop.inventory.exchange
+    inventory-product-queue: dwkshop.inventory.product
     refund-exchange: dwkshop.refund.exchange
     refund-approved-routing-key: refund.approved
     refund-approved-product-queue: dwkshop.refund.approved.product

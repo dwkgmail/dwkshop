@@ -17,22 +17,8 @@ import org.springframework.context.annotation.Configuration;
 public class RabbitMqConfig {
 
     @Bean
-    DirectExchange orderExchange(@Value("${dwkshop.mq.order-exchange}") String exchangeName) {
+    DirectExchange inventoryExchange(@Value("${dwkshop.mq.inventory-exchange}") String exchangeName) {
         return new DirectExchange(exchangeName, true, false);
-    }
-
-    @Bean
-    Queue orderCreatedQueue(@Value("${dwkshop.mq.order-created-queue}") String queueName) {
-        return new Queue(queueName, true);
-    }
-
-    @Bean
-    Binding orderCreatedBinding(
-        DirectExchange orderExchange,
-        Queue orderCreatedQueue,
-        @Value("${dwkshop.mq.order-created-routing-key}") String routingKey
-    ) {
-        return BindingBuilder.bind(orderCreatedQueue).to(orderExchange).with(routingKey);
     }
 
     @Bean
@@ -73,6 +59,7 @@ public class RabbitMqConfig {
     RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, Jackson2JsonMessageConverter messageConverter) {
         RabbitTemplate rabbitTemplate = new RabbitTemplate(connectionFactory);
         rabbitTemplate.setMessageConverter(messageConverter);
+        rabbitTemplate.setMandatory(true);
         return rabbitTemplate;
     }
 

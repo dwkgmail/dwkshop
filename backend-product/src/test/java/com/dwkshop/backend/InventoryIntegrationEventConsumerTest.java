@@ -7,8 +7,12 @@ import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.event.InventoryIntegrationEvent;
 import com.dwkshop.backend.product.InventoryIntegrationEventConsumer;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -77,6 +81,54 @@ class InventoryIntegrationEventConsumerTest {
         assertThat(result.getStock()).isEqualTo(3);
         assertThat(result.getLockedStock()).isEqualTo(2);
         assertThat(consumedRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentOrderCreatedEventsNeverOversellStock() throws Exception {
+        ProductSku sku = sku(5, 0);
+        CountDownLatch start = new CountDownLatch(1);
+        var results = java.util.Collections.synchronizedList(new ArrayList<Boolean>());
+        var executor = Executors.newFixedThreadPool(2);
+
+        for (int i = 0; i < 2; i++) {
+            int index = i;
+            executor.submit(() -> {
+                try {
+                    start.await();
+                    consumer.consume(event("concurrent-" + index, InventoryIntegrationEvent.ORDER_CREATED, 1, 200L + index, sku.getId(), 3));
+                    results.add(true);
+                } catch (Exception ex) {
+                    results.add(false);
+                }
+            });
+        }
+
+        start.countDown();
+        executor.shutdown();
+        assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+
+        ProductSku result = skuRepository.findById(sku.getId()).orElseThrow();
+        assertThat(results).containsExactlyInAnyOrder(true, false);
+        assertThat(result.getStock()).isEqualTo(2);
+        assertThat(result.getLockedStock()).isEqualTo(3);
+        assertThat(consumedRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void duplicateRefundApprovedMessageOnlyRestoresStockOnce() {
+        ProductSku sku = sku(2, 3);
+        var refundApproved = event("refund-approved-1", InventoryIntegrationEvent.REFUND_APPROVED, 3, 301L, sku.getId(), 2);
+
+        consumer.consume(refundApproved);
+        consumer.consume(refundApproved);
+        consumer.consume(event("refund-approved-2", InventoryIntegrationEvent.REFUND_APPROVED, 3, 301L, sku.getId(), 2));
+
+        ProductSku result = skuRepository.findById(sku.getId()).orElseThrow();
+        assertThat(result.getStock()).isEqualTo(4);
+        assertThat(result.getLockedStock()).isEqualTo(1);
+        assertThat(consumedRepository.count()).isEqualTo(1);
+        assertThat(stateRepository.findByOrderIdAndSkuId(301L, sku.getId()).orElseThrow().getState())
+            .isEqualTo("RELEASED");
     }
 
     private InventoryIntegrationEvent event(String id, String type, int version, Long orderId, Long skuId, int quantity) {

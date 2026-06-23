@@ -117,7 +117,33 @@ RabbitMQ 不要使用本地默认账号。建议为应用创建独立 vhost 和�
 
 ### Maven mirror
 
-公司 Nexus/Artifactory 地址、镜像账号和 Token 应放在开发机或 CI 的 Maven `settings.xml` 中，由 CI Secret 注入。不要把包含 `<mirrors>`、`<servers>` 或明文凭据的个人/公司 `settings.xml` 提交到仓库，也不要为了使用私服修改项目 `pom.xml` 写入私有凭据。
+CI 使用仓库内的 `.github/maven-settings.xml` 明确指向 Maven Central，并通过 `actions/setup-java` 缓存 `~/.m2/repository`，缓存 key 由所有 `pom.xml` 参与计算。这样根目录执行 `mvn test` 与 CI 使用同一套 Maven 解析入口。
+
+如果本地或公司网络访问 Maven Central 不稳定，可复制 `docs/maven-settings.example.xml` 到个人 Maven 配置目录后替换为内网 Nexus/Artifactory 地址。不要提交真实地址、账号、Token 或个人 `settings.xml`。
+
+Linux/macOS:
+
+```bash
+mkdir -p ~/.m2
+cp docs/maven-settings.example.xml ~/.m2/settings.xml
+export MAVEN_MIRROR_URL=https://nexus.example.com/repository/maven-public/
+export MAVEN_MIRROR_USERNAME=your-username
+export MAVEN_MIRROR_PASSWORD=your-token
+mvn --settings ~/.m2/settings.xml test
+```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force $env:USERPROFILE\.m2
+Copy-Item docs\maven-settings.example.xml $env:USERPROFILE\.m2\settings.xml
+$env:MAVEN_MIRROR_URL = 'https://nexus.example.com/repository/maven-public/'
+$env:MAVEN_MIRROR_USERNAME = 'your-username'
+$env:MAVEN_MIRROR_PASSWORD = 'your-token'
+mvn --settings $env:USERPROFILE\.m2\settings.xml test
+```
+
+离线/内网环境先在可联网机器预热依赖缓存，再把 `~/.m2/repository` 同步到内网构建机；内网构建机继续使用指向内网镜像的 `settings.xml`。确认依赖完整后，可用 `mvn --offline --settings ~/.m2/settings.xml test` 验证离线构建。私服地址、账号和 Token 应由开发机环境变量或 CI Secret 注入，不要写入项目 `pom.xml`。
 
 ### 重建 Elasticsearch 商品索引
 

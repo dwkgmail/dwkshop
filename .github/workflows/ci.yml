@@ -30,9 +30,10 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+          cache-dependency-path: '**/pom.xml'
 
       - name: Run Maven tests
-        run: mvn --batch-mode --no-transfer-progress test
+        run: mvn --batch-mode --no-transfer-progress --settings .github/maven-settings.xml test
 
   frontend-builds:
     name: ${{ matrix.name }} build

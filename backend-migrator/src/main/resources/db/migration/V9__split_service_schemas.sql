@@ -9,6 +9,12 @@ CREATE DATABASE IF NOT EXISTS dwkshop_marketing CHARACTER SET utf8mb4 COLLATE ut
 CREATE DATABASE IF NOT EXISTS dwkshop_order CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE DATABASE IF NOT EXISTS dwkshop_aftersale CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
+-- Local/dev bootstrap only: the Docker Compose setup uses one shared
+-- dwkshop/dwkshop runtime account, so it receives broad privileges on these
+-- service schemas to keep local migrations and smoke tests simple.
+-- Production should not run runtime services with this grant. Use a dedicated
+-- migrator/admin account for DDL and create per-service runtime users with only
+-- the DML privileges required by their own schema.
 GRANT ALL PRIVILEGES ON dwkshop_auth.* TO 'dwkshop'@'%';
 GRANT ALL PRIVILEGES ON dwkshop_product.* TO 'dwkshop'@'%';
 GRANT ALL PRIVILEGES ON dwkshop_cart.* TO 'dwkshop'@'%';

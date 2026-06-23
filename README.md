@@ -107,7 +107,7 @@ Docker Compose 默认只把网关和中间件端口暴露到宿主机；业务�
 
 ### 数据库账号权限
 
-MySQL `root` 或等价的管理账号只交给一次性 `db-migrator`，不要注入网关或任何 runtime 服务。生产环境建议为每个服务创建独立账号，仅授予其所属 schema 所需的 DML 权限；若暂时共用 runtime 账号，也必须移除建库、授权、用户管理和访问其他业务 schema 的权限。迁移账号和 runtime 账号应分别轮换、审计和保存。
+MySQL `root` 或等价的管理账号只交给一次性 `db-migrator`，不要注入网关或任何 runtime 服务。`V9__split_service_schemas.sql` 中授予 `dwkshop` 用户 `ALL PRIVILEGES` 的语句仅服务于本地/开发 Compose 共享账号引导，不作为生产权限模型。生产环境建议为每个服务创建独立账号，仅授予其所属 schema 所需的 DML 权限；若暂时共用 runtime 账号，也必须移除建库、授权、用户管理和访问其他业务 schema 的权限。迁移账号和 runtime 账号应分别轮换、审计和保存。
 
 ### RabbitMQ 与 Elasticsearch
 

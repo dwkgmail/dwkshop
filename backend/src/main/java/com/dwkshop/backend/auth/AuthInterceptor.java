@@ -28,11 +28,11 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (token != null) {
             AuthPrincipal principal = tokenService.verify(token);
             if (path.startsWith("/admin/") && requiresAdminAccess(path) && !principal.isAdmin()) {
-                throw new AuthException("admin login required");
+                throw new AuthException("请先登录后台");
             }
             AuthContext.set(principal);
         } else if (path.startsWith("/admin/") && requiresAdminAccess(path)) {
-            throw new AuthException("admin login required");
+            throw new AuthException("请先登录后台");
         }
 
         return true;

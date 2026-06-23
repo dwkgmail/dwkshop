@@ -5,9 +5,11 @@ import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.Queue;
 import java.util.Map;
+import org.springframework.amqp.rabbit.config.RetryInterceptorBuilder;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.retry.RejectAndDontRequeueRecoverer;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -40,6 +42,11 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    Queue refundApprovedOrderParkingLotQueue(@Value("${dwkshop.mq.refund-approved-order-queue}") String name) {
+        return new Queue(name + ".parking-lot", true);
+    }
+
+    @Bean
     Binding refundApprovedOrderBinding(DirectExchange refundExchange, Queue refundApprovedOrderQueue,
         @Value("${dwkshop.mq.refund-approved-routing-key}") String routingKey) {
         return BindingBuilder.bind(refundApprovedOrderQueue).to(refundExchange).with(routingKey);
@@ -48,6 +55,11 @@ public class RabbitMqConfig {
     @Bean
     Binding refundApprovedOrderDeadBinding(DirectExchange refundExchange, Queue refundApprovedOrderDeadQueue) {
         return BindingBuilder.bind(refundApprovedOrderDeadQueue).to(refundExchange).with("refund.approved.order.dead");
+    }
+
+    @Bean
+    Binding refundApprovedOrderParkingLotBinding(DirectExchange refundExchange, Queue refundApprovedOrderParkingLotQueue) {
+        return BindingBuilder.bind(refundApprovedOrderParkingLotQueue).to(refundExchange).with("refund.approved.order.parking-lot");
     }
 
     @Bean
@@ -67,13 +79,22 @@ public class RabbitMqConfig {
     SimpleRabbitListenerContainerFactory rabbitListenerContainerFactory(
         ConnectionFactory connectionFactory,
         Jackson2JsonMessageConverter messageConverter,
-        @Value("${spring.rabbitmq.listener.simple.auto-startup:true}") boolean autoStartup
+        @Value("${spring.rabbitmq.listener.simple.auto-startup:true}") boolean autoStartup,
+        @Value("${dwkshop.mq.listener.retry.max-attempts:4}") int maxAttempts,
+        @Value("${dwkshop.mq.listener.retry.initial-interval-ms:500}") long initialInterval,
+        @Value("${dwkshop.mq.listener.retry.multiplier:2.0}") double multiplier,
+        @Value("${dwkshop.mq.listener.retry.max-interval-ms:5000}") long maxInterval
     ) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
         factory.setMessageConverter(messageConverter);
         factory.setAutoStartup(autoStartup);
         factory.setDefaultRequeueRejected(false);
+        factory.setAdviceChain(RetryInterceptorBuilder.stateless()
+            .maxAttempts(maxAttempts)
+            .backOffOptions(initialInterval, multiplier, maxInterval)
+            .recoverer(new RejectAndDontRequeueRecoverer())
+            .build());
         return factory;
     }
 }

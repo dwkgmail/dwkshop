@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: dwkshop-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - gateway:8080
+
+  - job_name: dwkshop-services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - auth-service:18081
+          - product-service:18082
+          - cart-service:18083
+          - order-service:18084
+          - aftersale-service:18085
+          - member-service:18086
+          - marketing-service:18087

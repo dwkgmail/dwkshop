@@ -38,10 +38,28 @@ spring:
         format_sql: true
 
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
 
 logging:
   pattern:
@@ -59,6 +77,12 @@ dwkshop:
     order-exchange: dwkshop.order.exchange
     order-created-queue: dwkshop.order.created
     order-created-routing-key: order.created
+    listener:
+      retry:
+        max-attempts: ${DWKSHOP_MQ_RETRY_MAX_ATTEMPTS:4}
+        initial-interval-ms: ${DWKSHOP_MQ_RETRY_INITIAL_INTERVAL_MS:500}
+        multiplier: ${DWKSHOP_MQ_RETRY_MULTIPLIER:2.0}
+        max-interval-ms: ${DWKSHOP_MQ_RETRY_MAX_INTERVAL_MS:5000}
   search:
     elasticsearch:
       enabled: ${DWKSHOP_ES_ENABLED:true}

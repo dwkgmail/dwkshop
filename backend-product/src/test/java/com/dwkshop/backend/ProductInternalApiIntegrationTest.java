@@ -12,6 +12,7 @@ import com.dwkshop.backend.auth.InternalServiceAuthConfig;
 import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -99,6 +101,35 @@ class ProductInternalApiIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.stock").value(9))
             .andExpect(jsonPath("$.lockedStock").value(3));
+    }
+
+    @Test
+    void stockLockFailureLeavesInventoryUnchanged() throws Exception {
+        SeededProduct seededProduct = seedProduct("Product Lock Guard", "SKU-LOCK", 120, 1, 0, true, true);
+
+        mockMvc.perform(post("/internal/products/skus/{skuId}/stock-locks", seededProduct.skuId())
+                .contentType(APPLICATION_JSON)
+                .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+                .content("{\"quantity\":2}"))
+            .andExpect(status().isBadRequest());
+
+        ProductSku sku = productSkuRepository.findById(seededProduct.skuId()).orElseThrow();
+        assertThat(sku.getStock()).isEqualTo(1);
+        assertThat(sku.getLockedStock()).isZero();
+    }
+
+    @Test
+    void searchFallsBackToDatabaseWhenElasticsearchIsUnavailable() throws Exception {
+        seedProduct("Fallback Product", "SKU-FALLBACK", 1200, 8, 0, true, true);
+        seedProduct("Other Product", "SKU-OTHER", 1500, 8, 0, true, true);
+        when(productSearchGateway.searchOnSaleProductIds("Fallback")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/search/products")
+                .param("keyword", "Fallback"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].name").value("Fallback Product"))
+            .andExpect(jsonPath("$").isArray())
+            .andExpect(jsonPath("$.length()").value(1));
     }
 
     @Test

@@ -23,6 +23,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
@@ -127,6 +128,58 @@ class AftersaleServiceIntegrationTest {
         mockMvc.perform(get("/api/aftersales/{id}", created.getId()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+    }
+
+    @Test
+    void duplicateRefundApprovalReturnsRefundedStateAndDoesNotAppendAnotherOutboxEvent() throws Exception {
+        when(orderClient.applyAftersale(102L, 1L)).thenReturn(
+            new AftersaleOrderSnapshot(102L, "SO202606180102", 1L, "13800000002", "WAIT_SHIP", "PAID", "NONE", 9900, true)
+        );
+        when(orderClient.getRefundContext(102L)).thenReturn(
+            new RefundOrderContext(
+                102L,
+                "SO202606180102",
+                1L,
+                "WAIT_SHIP",
+                "PAID",
+                "UNSHIPPED",
+                "APPLYING",
+                9900,
+                true,
+                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(502L, 102L, 1, true))
+            )
+        );
+        when(orderClient.getAftersaleSnapshot(102L)).thenReturn(
+            new AftersaleOrderSnapshot(102L, "SO202606180102", 1L, "13800000002", "REFUNDED", "REFUNDED", "REFUNDED", 9900, true)
+        );
+
+        mockMvc.perform(post("/api/aftersales")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": 102,
+                      "reason": "Duplicate approval check"
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("APPLYING"));
+
+        AftersaleOrder created = aftersaleOrderRepository.findAll().get(0);
+
+        mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+
+        mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+
+        assertThat(outboxEventRepository.findAll()).hasSize(1);
+        assertThat(refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow().getFlowStatus())
+            .isEqualTo("COMPLETED");
+        verify(orderClient, times(1)).getRefundContext(102L);
     }
 
     @Test

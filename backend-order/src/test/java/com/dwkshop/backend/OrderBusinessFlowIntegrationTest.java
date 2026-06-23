@@ -19,7 +19,11 @@ import com.dwkshop.backend.order.MemberPointAccount;
 import com.dwkshop.backend.order.ProductCatalogClient;
 import com.dwkshop.backend.order.ProductSkuSnapshot;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -125,6 +129,55 @@ class OrderBusinessFlowIntegrationTest {
         assertThat(tradeOrderItemRepository.count()).isZero();
         assertThat(tradeOrderAmountRepository.count()).isZero();
         assertThat(orderOutboxEventRepository.count()).isZero();
+    }
+
+    @Test
+    void concurrentCreateWithSameSettlementTokenPersistsOnlyOneOrderAndOutbox() throws Exception {
+        when(productCatalogClient.getSkuSnapshot(504L)).thenReturn(sku(504L, 5, 1200, true));
+        String token = confirmToken("""
+            {
+              "sourceType": "BUY_NOW",
+              "skuId": 504,
+              "quantity": 1,
+              "addressId": 10
+            }
+            """);
+
+        CountDownLatch start = new CountDownLatch(1);
+        var statuses = java.util.Collections.synchronizedList(new ArrayList<Integer>());
+        var executor = Executors.newFixedThreadPool(2);
+
+        for (int i = 0; i < 2; i++) {
+            executor.submit(() -> {
+                try {
+                    start.await();
+                    int status = mockMvc.perform(post("/api/orders/create")
+                            .contentType(APPLICATION_JSON)
+                            .content("""
+                                {
+                                  "settlementToken": "%s",
+                                  "expectedPayAmount": 1200
+                                }
+                                """.formatted(token)))
+                        .andReturn()
+                        .getResponse()
+                        .getStatus();
+                    statuses.add(status);
+                } catch (Exception ex) {
+                    statuses.add(500);
+                }
+            });
+        }
+
+        start.countDown();
+        executor.shutdown();
+        assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+
+        assertThat(statuses).containsExactlyInAnyOrder(200, 400);
+        assertThat(tradeOrderRepository.count()).isEqualTo(1);
+        assertThat(tradeOrderItemRepository.count()).isEqualTo(1);
+        assertThat(tradeOrderAmountRepository.count()).isEqualTo(1);
+        assertThat(orderOutboxEventRepository.count()).isEqualTo(1);
     }
 
     @Test

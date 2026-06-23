@@ -8,6 +8,11 @@ dist/
 # Backend build output
 target/
 
+# Android build output
+.gradle/
+build/
+local.properties
+
 # Logs
 *.log
 

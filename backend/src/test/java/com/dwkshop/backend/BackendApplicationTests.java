@@ -14,6 +14,7 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -47,7 +48,7 @@ class BackendApplicationTests {
 
         assertThat(userCount).isEqualTo(1);
         assertThat(productCount).isGreaterThanOrEqualTo(7);
-        assertThat(couponCount).isEqualTo(1);
+        assertThat(couponCount).isGreaterThanOrEqualTo(1);
         assertThat(pointAccountCount).isEqualTo(1);
     }
 
@@ -566,6 +567,66 @@ class BackendApplicationTests {
             .andExpect(jsonPath("$.orderStatus").value("FINISHED"))
             .andExpect(jsonPath("$.deliveryStatus").value("DELIVERED"))
             .andExpect(jsonPath("$.finishTime").isNotEmpty());
+    }
+
+    @Test
+    void adminManagementEndpointsCoverUsersCouponsRolesAndLogs() throws Exception {
+        String token = adminToken();
+
+        mockMvc.perform(get("/admin/users").header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].mobile").value("13800000001"))
+            .andExpect(jsonPath("$[0].availablePoints").value(5000));
+
+        mockMvc.perform(patch("/admin/users/{id}/status", 1)
+                .header("Authorization", "Bearer " + token)
+                .contentType("application/json")
+                .content("{\"status\":\"DISABLED\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("DISABLED"));
+        mockMvc.perform(patch("/admin/users/{id}/status", 1)
+                .header("Authorization", "Bearer " + token)
+                .contentType("application/json")
+                .content("{\"status\":\"ACTIVE\"}"))
+            .andExpect(status().isOk());
+
+        mockMvc.perform(post("/admin/coupons")
+                .header("Authorization", "Bearer " + token)
+                .contentType("application/json")
+                .content("""
+                    {
+                      "name":"Admin test coupon",
+                      "couponCode":"C-ADMIN-TEST-001",
+                      "couponType":"FULL_REDUCTION",
+                      "thresholdAmount":1000,
+                      "discountAmount":100,
+                      "totalQuantity":10,
+                      "receiveStartTime":"2026-01-01T00:00:00",
+                      "receiveEndTime":"2026-12-31T23:59:59",
+                      "useStartTime":"2026-01-01T00:00:00",
+                      "useEndTime":"2026-12-31T23:59:59",
+                      "couponStatus":"ENABLED"
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.couponCode").value("C-ADMIN-TEST-001"))
+            .andExpect(jsonPath("$.discountAmountText").value("1"));
+
+        mockMvc.perform(get("/admin/roles").header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[*].roleCode", hasItem("SUPER_ADMIN")));
+
+        mockMvc.perform(patch("/admin/admin-users/{id}/role", 1)
+                .header("Authorization", "Bearer " + token)
+                .contentType("application/json")
+                .content("{\"roleId\":2}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.roleName").value("运营专员"));
+
+        mockMvc.perform(get("/admin/operation-logs").header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[*].module", hasItem("COUPON")))
+            .andExpect(jsonPath("$[*].module", hasItem("PERMISSION")));
     }
 
 

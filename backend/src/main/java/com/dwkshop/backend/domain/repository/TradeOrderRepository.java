@@ -12,4 +12,6 @@ public interface TradeOrderRepository extends JpaRepository<TradeOrder, Long> {
     List<TradeOrder> findByUserIdOrderByIdDesc(Long userId);
 
     Optional<TradeOrder> findByIdAndUserId(Long id, Long userId);
+
+    long countByUserId(Long userId);
 }

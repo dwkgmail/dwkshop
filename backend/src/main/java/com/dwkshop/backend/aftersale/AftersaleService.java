@@ -1,5 +1,6 @@
 package com.dwkshop.backend.aftersale;
 
+import com.dwkshop.backend.admin.AdminOperationLogService;
 import com.dwkshop.backend.aftersale.dto.AftersaleResponse;
 import com.dwkshop.backend.aftersale.dto.CreateAftersaleRequest;
 import com.dwkshop.backend.aftersale.dto.RejectAftersaleRequest;
@@ -32,17 +33,20 @@ public class AftersaleService {
     private final TradeOrderRepository tradeOrderRepository;
     private final TradeOrderItemRepository tradeOrderItemRepository;
     private final ProductSkuRepository productSkuRepository;
+    private final AdminOperationLogService operationLogService;
 
     public AftersaleService(
         AftersaleOrderRepository aftersaleOrderRepository,
         TradeOrderRepository tradeOrderRepository,
         TradeOrderItemRepository tradeOrderItemRepository,
-        ProductSkuRepository productSkuRepository
+        ProductSkuRepository productSkuRepository,
+        AdminOperationLogService operationLogService
     ) {
         this.aftersaleOrderRepository = aftersaleOrderRepository;
         this.tradeOrderRepository = tradeOrderRepository;
         this.tradeOrderItemRepository = tradeOrderItemRepository;
         this.productSkuRepository = productSkuRepository;
+        this.operationLogService = operationLogService;
     }
 
     @Transactional
@@ -134,6 +138,7 @@ public class AftersaleService {
         aftersale.setRefundTime(now);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
+        operationLogService.record("AFTERSALE", "APPROVE", "AFTERSALE", id, "售后通过：" + aftersale.getAftersaleNo());
         return toResponse(aftersale, order);
     }
 
@@ -157,6 +162,7 @@ public class AftersaleService {
         order.setAftersaleStatus(REJECTED);
         order.setUpdatedAt(now);
         tradeOrderRepository.save(order);
+        operationLogService.record("AFTERSALE", "REJECT", "AFTERSALE", id, "售后拒绝：" + aftersale.getRejectReason());
         return toResponse(aftersale, order);
     }
 

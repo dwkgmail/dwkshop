@@ -3,11 +3,6 @@ services:
     extends:
       file: docker-compose.yml
       service: mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -udwkshop -pdwkshop --silent"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
   redis:
     extends:
       file: docker-compose.yml
@@ -50,11 +45,26 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - auth-service
-      - product-service
-      - cart-service
-      - order-service
-      - aftersale-service
+      auth-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      aftersale-service:
+        condition: service_healthy
+      member-service:
+        condition: service_healthy
+      marketing-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   auth-service:
     build:
@@ -72,7 +82,13 @@ services:
       db-migrator:
         condition: service_completed_successfully
       mysql:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18081/actuator/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   product-service:
     build:
@@ -91,9 +107,22 @@ services:
       DWKSHOP_ES_URIS: http://elasticsearch:9200
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
     depends_on:
-      - auth-service
-      - elasticsearch
-      - rabbitmq
+      db-migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18082/actuator/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   cart-service:
     build:
@@ -110,8 +139,20 @@ services:
       DWKSHOP_PRODUCT_SERVICE_BASE_URL: http://product-service:18082
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
     depends_on:
-      - auth-service
-      - product-service
+      db-migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18083/actuator/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   member-service:
     build:
@@ -127,7 +168,18 @@ services:
       SPRING_DATASOURCE_PASSWORD: dwkshop
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
     depends_on:
-      - auth-service
+      db-migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18086/actuator/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   marketing-service:
     build:
@@ -143,7 +195,18 @@ services:
       SPRING_DATASOURCE_PASSWORD: dwkshop
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
     depends_on:
-      - auth-service
+      db-migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18087/actuator/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   order-service:
     build:
@@ -165,13 +228,30 @@ services:
       DWKSHOP_PRODUCT_SERVICE_BASE_URL: http://product-service:18082
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
     depends_on:
-      - auth-service
-      - cart-service
-      - marketing-service
-      - member-service
-      - product-service
-      - redis
-      - rabbitmq
+      db-migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      marketing-service:
+        condition: service_healthy
+      member-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18084/actuator/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   aftersale-service:
     build:
@@ -189,9 +269,22 @@ services:
       DWKSHOP_ORDER_SERVICE_BASE_URL: http://order-service:18084
       DWKSHOP_INTERNAL_SECRET: dwkshop-shared-internal-secret
     depends_on:
-      - auth-service
-      - order-service
-      - rabbitmq
+      db-migrator:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18085/actuator/health/readiness >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
 volumes:
   mysql_data:

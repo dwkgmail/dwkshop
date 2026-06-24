@@ -139,10 +139,11 @@ export function confirmOrder(payload: ConfirmOrderPayload) {
   });
 }
 
-export function createOrder(settlementToken: string, expectedPayAmount: number, remark?: string) {
+export function createOrder(settlementToken: string, expectedPayAmount: number, remark?: string, clientRequestId?: string) {
   return request<OrderDetail>('/api/orders/create', {
     method: 'POST',
-    body: JSON.stringify({ settlementToken, expectedPayAmount, remark })
+    headers: clientRequestId ? { 'Idempotency-Key': clientRequestId } : undefined,
+    body: JSON.stringify({ settlementToken, expectedPayAmount, remark, clientRequestId })
   });
 }
 

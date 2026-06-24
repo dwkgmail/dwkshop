@@ -13,5 +13,7 @@ public interface TradeOrderRepository extends JpaRepository<TradeOrder, Long> {
 
     Optional<TradeOrder> findByIdAndUserId(Long id, Long userId);
 
+    Optional<TradeOrder> findByUserIdAndClientRequestId(Long userId, String clientRequestId);
+
     long countByUserId(Long userId);
 }

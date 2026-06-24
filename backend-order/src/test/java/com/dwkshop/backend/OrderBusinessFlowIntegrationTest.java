@@ -181,6 +181,51 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     @Test
+    void createOrderWithSameClientRequestIdReturnsExistingOrderAfterTokenWasConsumed() throws Exception {
+        when(productCatalogClient.getSkuSnapshot(505L)).thenReturn(sku(505L, 5, 1300, true));
+        String token = confirmToken("""
+            {
+              "sourceType": "BUY_NOW",
+              "skuId": 505,
+              "quantity": 1,
+              "addressId": 10
+            }
+            """);
+
+        String first = mockMvc.perform(post("/api/orders/create")
+                .contentType(APPLICATION_JSON)
+                .header("Idempotency-Key", "checkout-retry-001")
+                .content("""
+                    {
+                      "settlementToken": "%s",
+                      "expectedPayAmount": 1300
+                    }
+                    """.formatted(token)))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+        Integer firstOrderId = com.jayway.jsonpath.JsonPath.read(first, "$.id");
+
+        mockMvc.perform(post("/api/orders/create")
+                .contentType(APPLICATION_JSON)
+                .header("Idempotency-Key", "checkout-retry-001")
+                .content("""
+                    {
+                      "settlementToken": "%s",
+                      "expectedPayAmount": 1300
+                    }
+                    """.formatted(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(firstOrderId));
+
+        assertThat(tradeOrderRepository.count()).isEqualTo(1);
+        assertThat(tradeOrderItemRepository.count()).isEqualTo(1);
+        assertThat(tradeOrderAmountRepository.count()).isEqualTo(1);
+        assertThat(orderOutboxEventRepository.count()).isEqualTo(1);
+    }
+
+    @Test
     void pointDeductionIsPersistedAndRefundApprovalCompensatesOrderState() throws Exception {
         when(productCatalogClient.getSkuSnapshot(503L)).thenReturn(sku(503L, 5, 1500, true));
         when(memberClient.getPointAccount(1L)).thenReturn(new MemberPointAccount(1L, 50000));

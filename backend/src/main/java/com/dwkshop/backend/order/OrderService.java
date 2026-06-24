@@ -126,6 +126,13 @@ public class OrderService {
 
     @Transactional
     public OrderResponse create(Long userId, CreateOrderRequest request) {
+        String clientRequestId = normalizeClientRequestId(request.clientRequestId());
+        if (clientRequestId != null) {
+            OrderResponse existingOrder = findIdempotentOrder(userId, clientRequestId);
+            if (existingOrder != null) {
+                return existingOrder;
+            }
+        }
         SettlementSession session = settlementSessionStore.consume(request.settlementToken())
             .orElse(null);
         if (session == null || !session.userId().equals(userId)) {
@@ -144,7 +151,7 @@ public class OrderService {
             if (!session.expectedPayAmount().equals(request.expectedPayAmount())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单金额已变化，请重新确认");
             }
-            OrderResponse order = persistOrder(userId, session.request(), calculation, request.remark());
+            OrderResponse order = persistOrder(userId, session.request(), calculation, request.remark(), clientRequestId);
             eventPublisher.publishEvent(new OrderCreatedEvent(
                 order.id(),
                 order.orderNo(),
@@ -398,12 +405,13 @@ public class OrderService {
         return new PointSelection(visible, availablePoints, deduction, selected);
     }
 
-    private OrderResponse persistOrder(Long userId, ConfirmOrderRequest request, SettlementCalculation calculation, String createRemark) {
+    private OrderResponse persistOrder(Long userId, ConfirmOrderRequest request, SettlementCalculation calculation, String createRemark, String clientRequestId) {
         LocalDateTime now = LocalDateTime.now();
         // 先落主订单，再保存明细、金额快照和优惠券使用状态。
         TradeOrder order = new TradeOrder();
         order.setOrderNo("SO" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(now) + UUID.randomUUID().toString().substring(0, 6).toUpperCase());
         order.setUserId(userId);
+        order.setClientRequestId(clientRequestId);
         order.setOrderStatus("WAIT_PAY");
         order.setPayStatus("UNPAID");
         order.setDeliveryStatus(DELIVERY_UNSHIPPED);
@@ -488,6 +496,23 @@ public class OrderService {
         }
 
         return toOrderResponse(savedOrder);
+    }
+
+    private OrderResponse findIdempotentOrder(Long userId, String clientRequestId) {
+        return tradeOrderRepository.findByUserIdAndClientRequestId(userId, clientRequestId)
+            .map(this::toOrderResponse)
+            .orElse(null);
+    }
+
+    private String normalizeClientRequestId(String clientRequestId) {
+        if (clientRequestId == null) {
+            return null;
+        }
+        String trimmed = clientRequestId.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        return trimmed.length() > 64 ? trimmed.substring(0, 64) : trimmed;
     }
 
     private ConfirmOrderResponse toConfirmResponse(String token, SettlementCalculation calculation, String remark) {

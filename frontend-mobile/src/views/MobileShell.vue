@@ -76,6 +76,7 @@ const cart = ref<CartResponse | null>(null);
 const searchKeyword = ref('');
 const confirmPayload = ref<ConfirmOrderPayload | null>(null);
 const confirmData = ref<ConfirmOrderResponse | null>(null);
+const orderClientRequestId = ref('');
 const currentOrder = ref<OrderDetail | null>(null);
 const orders = ref<OrderSummary[]>([]);
 const paymentMessage = ref('');
@@ -346,6 +347,7 @@ async function openCartConfirm() {
 
 async function openConfirm(payload: ConfirmOrderPayload) {
   confirmPayload.value = payload;
+  orderClientRequestId.value = makeClientRequestId();
   route.view = 'confirm';
   await runTask(async () => {
     confirmData.value = await confirmOrder(payload);
@@ -363,12 +365,25 @@ async function toggleUsePoints() {
 
 async function submitOrder() {
   if (!confirmData.value) return;
+  if (!orderClientRequestId.value) {
+    orderClientRequestId.value = makeClientRequestId();
+  }
   await runTask(async () => {
-    currentOrder.value = await createOrder(confirmData.value!.settlementToken, confirmData.value!.amount.payAmount);
+    currentOrder.value = await createOrder(
+      confirmData.value!.settlementToken,
+      confirmData.value!.amount.payAmount,
+      undefined,
+      orderClientRequestId.value
+    );
     await loadCartQuietly();
     paymentMessage.value = '';
     route.view = 'payment';
   });
+}
+
+function makeClientRequestId() {
+  const randomPart = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `order-${randomPart}`;
 }
 
 async function payCurrentOrder() {
@@ -819,4 +834,3 @@ onUnmounted(() => {
     </nav>
   </main>
 </template>
-

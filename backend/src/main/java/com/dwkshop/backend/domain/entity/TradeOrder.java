@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -15,7 +16,10 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "trade_order")
+@Table(
+    name = "trade_order",
+    uniqueConstraints = @UniqueConstraint(name = "uk_trade_order_user_client_request", columnNames = {"user_id", "client_request_id"})
+)
 public class TradeOrder {
 
     @Id
@@ -27,6 +31,9 @@ public class TradeOrder {
 
     @Column(nullable = false)
     private Long userId;
+
+    @Column(length = 64)
+    private String clientRequestId;
 
     @Column(nullable = false, length = 30)
     private String orderStatus;

@@ -11,6 +11,12 @@ public record OrderItemResponse(
     String salePriceText,
     Integer quantity,
     Integer payAmount,
-    String payAmountText
+    String payAmountText,
+    Integer refundableQuantity,
+    Integer refundedQuantity,
+    Integer aftersaleQuantity,
+    Integer refundAmount,
+    String refundAmountText,
+    String refundStatus
 ) {
 }

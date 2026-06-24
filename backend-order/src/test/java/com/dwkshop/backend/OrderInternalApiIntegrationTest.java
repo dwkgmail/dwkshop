@@ -189,6 +189,10 @@ class OrderInternalApiIntegrationTest {
         item.setPayAmount(payAmount);
         item.setSupportRefund(supportRefund);
         item.setAftersaleQuantity(0);
+        item.setRefundableQuantity(quantity);
+        item.setRefundedQuantity(0);
+        item.setRefundAmount(0);
+        item.setRefundStatus("NONE");
         item.setCreatedAt(now);
         tradeOrderItemRepository.save(item);
 

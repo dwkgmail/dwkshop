@@ -1,10 +1,13 @@
 package com.dwkshop.backend.aftersale;
 
 import com.dwkshop.backend.aftersale.dto.AftersaleResponse;
+import com.dwkshop.backend.aftersale.dto.AftersaleItemResponse;
 import com.dwkshop.backend.aftersale.dto.CreateAftersaleRequest;
 import com.dwkshop.backend.aftersale.dto.RejectAftersaleRequest;
+import com.dwkshop.backend.domain.entity.AftersaleOrderItem;
 import com.dwkshop.backend.domain.entity.AftersaleOrder;
 import com.dwkshop.backend.domain.entity.AftersaleRefundFlow;
+import com.dwkshop.backend.domain.repository.AftersaleOrderItemRepository;
 import com.dwkshop.backend.domain.repository.AftersaleOrderRepository;
 import com.dwkshop.backend.domain.repository.AftersaleRefundFlowRepository;
 import com.dwkshop.backend.util.PriceFormatter;
@@ -26,19 +29,26 @@ public class AftersaleService {
     private static final String FLOW_PENDING = "PENDING";
     private static final String FLOW_COMPLETED = "COMPLETED";
     private static final String STEP_EVENT_PENDING = "EVENT_PENDING";
+    private static final String REFUND_ONLY = "REFUND_ONLY";
+    private static final String RETURN_AND_REFUND = "RETURN_AND_REFUND";
+    private static final String FULL = "FULL";
+    private static final String PARTIAL = "PARTIAL";
 
     private final AftersaleOrderRepository aftersaleOrderRepository;
+    private final AftersaleOrderItemRepository aftersaleOrderItemRepository;
     private final AftersaleRefundFlowRepository refundFlowRepository;
     private final OrderClient orderClient;
     private final RefundApprovedOutbox refundApprovedOutbox;
 
     public AftersaleService(
         AftersaleOrderRepository aftersaleOrderRepository,
+        AftersaleOrderItemRepository aftersaleOrderItemRepository,
         AftersaleRefundFlowRepository refundFlowRepository,
         OrderClient orderClient,
         RefundApprovedOutbox refundApprovedOutbox
     ) {
         this.aftersaleOrderRepository = aftersaleOrderRepository;
+        this.aftersaleOrderItemRepository = aftersaleOrderItemRepository;
         this.refundFlowRepository = refundFlowRepository;
         this.orderClient = orderClient;
         this.refundApprovedOutbox = refundApprovedOutbox;
@@ -46,10 +56,16 @@ public class AftersaleService {
 
     @Transactional
     public AftersaleResponse create(Long userId, CreateAftersaleRequest request) {
-        aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(request.orderId(), List.of(APPLYING, REFUNDED))
+        aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(request.orderId(), List.of(APPLYING))
             .ifPresent(item -> {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund request already exists");
             });
+        RefundOrderContext context = orderClient.getRefundContext(request.orderId());
+        List<ResolvedRefundItem> refundItems = resolveRefundItems(request, context);
+        if (refundItems.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund items are required");
+        }
+        String refundScope = refundScope(request, refundItems, context);
         AftersaleOrderSnapshot order = orderClient.applyAftersale(request.orderId(), userId);
 
         LocalDateTime now = LocalDateTime.now();
@@ -57,14 +73,21 @@ public class AftersaleService {
         aftersale.setAftersaleNo("AS" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(now) + UUID.randomUUID().toString().substring(0, 6).toUpperCase());
         aftersale.setOrderId(order.id());
         aftersale.setUserId(userId);
-        aftersale.setAftersaleType("REFUND");
+        aftersale.setAftersaleType(normalizeAftersaleType(request.aftersaleType()));
+        aftersale.setRefundScope(refundScope);
         aftersale.setAftersaleStatus(APPLYING);
-        aftersale.setRefundAmount(order.payAmount());
+        aftersale.setRefundAmount(refundItems.stream().mapToInt(ResolvedRefundItem::refundAmount).sum());
+        aftersale.setIncludeFreight(Boolean.TRUE.equals(request.includeFreight()));
         aftersale.setReason(request.reason().trim());
+        aftersale.setRefundReasonType(normalizeOptionalText(request.refundReasonType()));
+        aftersale.setEvidenceImages(joinImages(request.evidenceImages()));
+        aftersale.setReturnLogisticsCompany(normalizePlainText(request.returnLogisticsCompany()));
+        aftersale.setReturnLogisticsNo(normalizePlainText(request.returnLogisticsNo()));
         aftersale.setApplyTime(now);
         aftersale.setCreatedAt(now);
         aftersale.setUpdatedAt(now);
         AftersaleOrder saved = aftersaleOrderRepository.save(aftersale);
+        aftersaleOrderItemRepository.saveAll(refundItems.stream().map(item -> toEntity(saved, item, now)).toList());
         saveFlow(saved, FLOW_PENDING, null, 0, null);
         return toResponse(saved, order);
     }
@@ -111,7 +134,8 @@ public class AftersaleService {
         aftersale.setRefundTime(now);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
-        refundApprovedOutbox.append(aftersale, orderContext, now);
+        List<AftersaleOrderItem> items = aftersaleOrderItemRepository.findByAftersaleIdOrderById(aftersale.getId());
+        refundApprovedOutbox.append(aftersale, orderContext, items, now);
         saveFlow(loadOrCreateFlow(aftersale), FLOW_COMPLETED, STEP_EVENT_PENDING, 0, null);
         return toResponse(aftersale, approvedOrderSnapshot(orderContext));
     }
@@ -155,10 +179,19 @@ public class AftersaleService {
             aftersale.getUserId(),
             order == null ? null : order.receiverMobile(),
             aftersale.getAftersaleType(),
+            aftersale.getRefundScope(),
             aftersale.getAftersaleStatus(),
+            aftersaleOrderItemRepository.findByAftersaleIdOrderById(aftersale.getId()).stream()
+                .map(this::toItemResponse)
+                .toList(),
             aftersale.getRefundAmount(),
             PriceFormatter.formatCents(aftersale.getRefundAmount()),
+            aftersale.getIncludeFreight(),
             aftersale.getReason(),
+            aftersale.getRefundReasonType(),
+            splitImages(aftersale.getEvidenceImages()),
+            aftersale.getReturnLogisticsCompany(),
+            aftersale.getReturnLogisticsNo(),
             aftersale.getRejectReason(),
             aftersale.getApplyTime(),
             aftersale.getAuditTime(),
@@ -207,5 +240,126 @@ public class AftersaleService {
             context.orderId(), context.orderNo(), context.userId(), null, context.orderStatus(), "REFUNDED", "REFUNDED",
             context.payAmount(), context.refundable()
         );
+    }
+
+    private List<ResolvedRefundItem> resolveRefundItems(CreateAftersaleRequest request, RefundOrderContext context) {
+        if (!Boolean.TRUE.equals(context.refundable())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order is not refundable");
+        }
+        List<RefundOrderItemSnapshot> sourceItems = context.items() == null ? List.of() : context.items();
+        List<RequestedRefundItem> requestedItems = request.refundItems() == null || request.refundItems().isEmpty()
+            ? sourceItems.stream()
+                .filter(item -> Boolean.TRUE.equals(item.supportRefund()) && positive(item.refundableQuantity()) > 0)
+                .map(item -> new RequestedRefundItem(item.skuId(), positive(item.refundableQuantity())))
+                .toList()
+            : request.refundItems().stream()
+                .map(item -> new RequestedRefundItem(item.skuId(), item.quantity()))
+                .toList();
+        int grossPayAmount = sourceItems.stream().mapToInt(item -> positive(item.payAmount())).sum();
+        int orderPayAmount = positive(context.payAmount());
+        return requestedItems.stream().map(requested -> {
+            RefundOrderItemSnapshot source = sourceItems.stream()
+                .filter(item -> item.skuId().equals(requested.skuId()))
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund SKU is not in order"));
+            if (!Boolean.TRUE.equals(source.supportRefund())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund SKU is not refundable");
+            }
+            int quantity = positive(requested.quantity());
+            int refundableQuantity = positive(source.refundableQuantity());
+            if (quantity <= 0 || quantity > refundableQuantity) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund quantity exceeds refundable quantity");
+            }
+            int itemGrossAmount = positive(source.payAmount()) * quantity / Math.max(positive(source.quantity()), 1);
+            int refundAmount = grossPayAmount <= 0 ? 0 : itemGrossAmount * orderPayAmount / grossPayAmount;
+            return new ResolvedRefundItem(source.productId(), source.skuId(), quantity, refundAmount);
+        }).toList();
+    }
+
+    private String refundScope(CreateAftersaleRequest request, List<ResolvedRefundItem> refundItems, RefundOrderContext context) {
+        String requested = normalizeOptionalText(request.refundScope());
+        if (FULL.equals(requested) || PARTIAL.equals(requested)) {
+            return requested;
+        }
+        int requestedQuantity = refundItems.stream().mapToInt(ResolvedRefundItem::quantity).sum();
+        int refundableQuantity = context.items() == null ? 0 : context.items().stream().mapToInt(item -> positive(item.refundableQuantity())).sum();
+        return requestedQuantity >= refundableQuantity ? FULL : PARTIAL;
+    }
+
+    private AftersaleOrderItem toEntity(AftersaleOrder aftersale, ResolvedRefundItem item, LocalDateTime now) {
+        AftersaleOrderItem entity = new AftersaleOrderItem();
+        entity.setAftersaleId(aftersale.getId());
+        entity.setOrderId(aftersale.getOrderId());
+        entity.setProductId(item.productId());
+        entity.setSkuId(item.skuId());
+        entity.setQuantity(item.quantity());
+        entity.setRefundAmount(item.refundAmount());
+        entity.setCreatedAt(now);
+        return entity;
+    }
+
+    private AftersaleItemResponse toItemResponse(AftersaleOrderItem item) {
+        return new AftersaleItemResponse(
+            item.getSkuId(),
+            item.getProductId(),
+            item.getQuantity(),
+            item.getRefundAmount(),
+            PriceFormatter.formatCents(item.getRefundAmount())
+        );
+    }
+
+    private String normalizeAftersaleType(String type) {
+        String normalized = normalizeOptionalText(type);
+        if (RETURN_AND_REFUND.equals(normalized)) {
+            return RETURN_AND_REFUND;
+        }
+        return REFUND_ONLY;
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed.toUpperCase();
+    }
+
+    private String normalizePlainText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String joinImages(List<String> images) {
+        if (images == null || images.isEmpty()) {
+            return null;
+        }
+        return images.stream()
+            .filter(item -> item != null && !item.isBlank())
+            .map(String::trim)
+            .limit(9)
+            .reduce((left, right) -> left + "," + right)
+            .orElse(null);
+    }
+
+    private List<String> splitImages(String images) {
+        if (images == null || images.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(images.split(","))
+            .filter(item -> !item.isBlank())
+            .toList();
+    }
+
+    private int positive(Integer value) {
+        return value == null ? 0 : Math.max(value, 0);
+    }
+
+    private record RequestedRefundItem(Long skuId, Integer quantity) {
+    }
+
+    private record ResolvedRefundItem(Long productId, Long skuId, Integer quantity, Integer refundAmount) {
     }
 }

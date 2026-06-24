@@ -56,6 +56,12 @@ export interface OrderDetail extends OrderSummary {
     quantity: number;
     payAmount: number;
     payAmountText: string;
+    refundableQuantity: number;
+    refundedQuantity: number;
+    aftersaleQuantity: number;
+    refundAmount: number;
+    refundAmountText: string;
+    refundStatus: string;
   }>;
 }
 

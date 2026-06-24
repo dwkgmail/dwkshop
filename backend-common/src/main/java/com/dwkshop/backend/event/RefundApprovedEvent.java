@@ -10,9 +10,11 @@ public record RefundApprovedEvent(
     String aftersaleNo,
     Long orderId,
     String orderStatus,
+    String refundScope,
+    Integer refundAmount,
     LocalDateTime approvedAt,
     List<RefundItem> items
 ) {
-    public record RefundItem(Long skuId, Integer quantity) {
+    public record RefundItem(Long skuId, Integer quantity, Integer refundAmount) {
     }
 }

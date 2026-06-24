@@ -16,6 +16,6 @@ public class RefundApprovedConsumer {
 
     @RabbitListener(queues = "${dwkshop.mq.refund-approved-order-queue}")
     public void consume(RefundApprovedEvent event) {
-        orderService.completeAftersale(event.orderId());
+        orderService.completeAftersale(event);
     }
 }

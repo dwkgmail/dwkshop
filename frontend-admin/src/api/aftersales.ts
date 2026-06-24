@@ -8,10 +8,23 @@ export interface Aftersale {
   userId: number;
   receiverMobile: string;
   aftersaleType: string;
+  refundScope: string;
   aftersaleStatus: string;
+  refundItems: Array<{
+    skuId: number;
+    productId: number;
+    quantity: number;
+    refundAmount: number;
+    refundAmountText: string;
+  }>;
   refundAmount: number;
   refundAmountText: string;
+  includeFreight: boolean;
   reason: string;
+  refundReasonType?: string;
+  evidenceImages: string[];
+  returnLogisticsCompany?: string;
+  returnLogisticsNo?: string;
   rejectReason?: string;
   applyTime: string;
   auditTime?: string;

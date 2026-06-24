@@ -61,5 +61,17 @@ public class TradeOrderItem {
     @Column(nullable = false)
     private Integer aftersaleQuantity;
 
+    @Column(nullable = false)
+    private Integer refundableQuantity;
+
+    @Column(nullable = false)
+    private Integer refundedQuantity;
+
+    @Column(nullable = false)
+    private Integer refundAmount;
+
+    @Column(nullable = false, length = 30)
+    private String refundStatus;
+
     private LocalDateTime createdAt;
 }

@@ -87,7 +87,7 @@ class AftersaleServiceIntegrationTest {
                 "APPLYING",
                 19900,
                 true,
-                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(501L, 101L, 2, true))
+                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(501L, 101L, 2, 2, 0, 0, 19900, 0, "NONE", true))
             )
         );
 
@@ -146,7 +146,7 @@ class AftersaleServiceIntegrationTest {
                 "APPLYING",
                 9900,
                 true,
-                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(502L, 102L, 1, true))
+                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(502L, 102L, 1, 1, 0, 0, 9900, 0, "NONE", true))
             )
         );
         when(orderClient.getAftersaleSnapshot(102L)).thenReturn(
@@ -179,13 +179,27 @@ class AftersaleServiceIntegrationTest {
         assertThat(outboxEventRepository.findAll()).hasSize(1);
         assertThat(refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow().getFlowStatus())
             .isEqualTo("COMPLETED");
-        verify(orderClient, times(1)).getRefundContext(102L);
+        verify(orderClient, times(2)).getRefundContext(102L);
     }
 
     @Test
     void rejectUsesOrderServiceAndPersistsRejectReason() throws Exception {
         when(orderClient.applyAftersale(101L, 1L)).thenReturn(
             new AftersaleOrderSnapshot(101L, "SO202606180101", 1L, "13800000001", "WAIT_SHIP", "PAID", "NONE", 15900, true)
+        );
+        when(orderClient.getRefundContext(101L)).thenReturn(
+            new RefundOrderContext(
+                101L,
+                "SO202606180101",
+                1L,
+                "WAIT_SHIP",
+                "PAID",
+                "UNSHIPPED",
+                "APPLYING",
+                15900,
+                true,
+                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(503L, 101L, 1, 1, 0, 0, 15900, 0, "NONE", true))
+            )
         );
         when(orderClient.rejectAftersale(101L)).thenReturn(
             new AftersaleOrderSnapshot(101L, "SO202606180101", 1L, "13800000001", "WAIT_SHIP", "PAID", "REJECTED", 15900, true)

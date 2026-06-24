@@ -35,13 +35,31 @@ public class AftersaleOrder {
     private String aftersaleType;
 
     @Column(nullable = false, length = 30)
+    private String refundScope;
+
+    @Column(nullable = false, length = 30)
     private String aftersaleStatus;
 
     @Column(nullable = false)
     private Integer refundAmount;
 
     @Column(nullable = false)
+    private Boolean includeFreight;
+
+    @Column(nullable = false)
     private String reason;
+
+    @Column(length = 50)
+    private String refundReasonType;
+
+    @Column(length = 1000)
+    private String evidenceImages;
+
+    @Column(length = 64)
+    private String returnLogisticsCompany;
+
+    @Column(length = 64)
+    private String returnLogisticsNo;
 
     private String rejectReason;
 

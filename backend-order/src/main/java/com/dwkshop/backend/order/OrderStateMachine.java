@@ -26,6 +26,7 @@ final class OrderStateMachine {
     static final String AFTERSALE_NONE = "NONE";
     static final String AFTERSALE_APPLYING = "APPLYING";
     static final String AFTERSALE_REJECTED = "REJECTED";
+    static final String AFTERSALE_PARTIAL_REFUNDED = "PARTIAL_REFUNDED";
     static final String AFTERSALE_REFUNDED = "REFUNDED";
 
     private OrderStateMachine() {
@@ -86,7 +87,7 @@ final class OrderStateMachine {
     static void applyAftersale(TradeOrder order, LocalDateTime now) {
         require(PAY_PAID.equals(order.getPayStatus()), "只有已支付订单可以申请退款");
         require(!AFTERSALE_REFUNDED.equals(order.getAftersaleStatus()), "订单已退款");
-        require(AFTERSALE_NONE.equals(order.getAftersaleStatus()) || AFTERSALE_REJECTED.equals(order.getAftersaleStatus()), "订单已有处理中的售后申请");
+        require(AFTERSALE_NONE.equals(order.getAftersaleStatus()) || AFTERSALE_REJECTED.equals(order.getAftersaleStatus()) || AFTERSALE_PARTIAL_REFUNDED.equals(order.getAftersaleStatus()), "订单已有处理中的售后申请");
         order.setAftersaleStatus(AFTERSALE_APPLYING);
         order.setUpdatedAt(now);
     }
@@ -98,12 +99,20 @@ final class OrderStateMachine {
     }
 
     static boolean completeAftersale(TradeOrder order, LocalDateTime now) {
+        return completeAftersale(order, now, true);
+    }
+
+    static boolean completeAftersale(TradeOrder order, LocalDateTime now, boolean fullRefund) {
         if (AFTERSALE_REFUNDED.equals(order.getAftersaleStatus())) {
             return false;
         }
         require(AFTERSALE_APPLYING.equals(order.getAftersaleStatus()), "订单售后状态不是处理中");
-        order.setPayStatus(PAY_REFUNDED);
-        order.setAftersaleStatus(AFTERSALE_REFUNDED);
+        if (fullRefund) {
+            order.setPayStatus(PAY_REFUNDED);
+            order.setAftersaleStatus(AFTERSALE_REFUNDED);
+        } else {
+            order.setAftersaleStatus(AFTERSALE_PARTIAL_REFUNDED);
+        }
         order.setUpdatedAt(now);
         return true;
     }

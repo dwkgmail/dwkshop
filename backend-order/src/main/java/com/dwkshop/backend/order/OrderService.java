@@ -6,6 +6,7 @@ import com.dwkshop.backend.domain.entity.TradeOrderItem;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
+import com.dwkshop.backend.event.RefundApprovedEvent;
 import com.dwkshop.backend.event.InventoryIntegrationEvent;
 import com.dwkshop.backend.order.dto.AdminShipOrderRequest;
 import com.dwkshop.backend.order.dto.AdminUpdateDeliveryStatusRequest;
@@ -236,7 +237,7 @@ public class OrderService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
         List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
         boolean refundable = !items.isEmpty()
-            && items.stream().allMatch(item -> Boolean.TRUE.equals(item.getSupportRefund()));
+            && items.stream().anyMatch(item -> Boolean.TRUE.equals(item.getSupportRefund()) && item.getRefundableQuantity() > 0);
         return new RefundOrderContext(
             order.getId(),
             order.getOrderNo(),
@@ -248,7 +249,18 @@ public class OrderService {
             order.getPayAmount(),
             refundable,
             items.stream()
-                .map(item -> new RefundOrderItemSnapshot(item.getSkuId(), item.getProductId(), item.getQuantity(), item.getSupportRefund()))
+                .map(item -> new RefundOrderItemSnapshot(
+                    item.getSkuId(),
+                    item.getProductId(),
+                    item.getQuantity(),
+                    item.getRefundableQuantity(),
+                    item.getRefundedQuantity(),
+                    item.getAftersaleQuantity(),
+                    item.getPayAmount(),
+                    item.getRefundAmount(),
+                    item.getRefundStatus(),
+                    item.getSupportRefund()
+                ))
                 .toList()
         );
     }
@@ -262,10 +274,38 @@ public class OrderService {
         }
         List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
         for (TradeOrderItem item : items) {
-            item.setAftersaleQuantity(item.getQuantity());
+            applyRefund(item, item.getRefundableQuantity(), item.getPayAmount() - item.getRefundAmount());
         }
         tradeOrderItemRepository.saveAll(items);
         OrderStateMachine.completeAftersale(order, LocalDateTime.now());
+        return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
+    }
+
+    @Transactional
+    public AftersaleOrderSnapshot completeAftersale(RefundApprovedEvent event) {
+        TradeOrder order = tradeOrderRepository.findById(event.orderId())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+        if (OrderStateMachine.AFTERSALE_REFUNDED.equals(order.getAftersaleStatus())) {
+            return toAftersaleSnapshot(order);
+        }
+        List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(event.orderId());
+        List<RefundApprovedEvent.RefundItem> refundItems = event.items() == null ? List.of() : event.items();
+        if (refundItems.isEmpty()) {
+            for (TradeOrderItem item : items) {
+                applyRefund(item, item.getRefundableQuantity(), item.getPayAmount() - item.getRefundAmount());
+            }
+        } else {
+            for (RefundApprovedEvent.RefundItem refundItem : refundItems) {
+                TradeOrderItem item = items.stream()
+                    .filter(candidate -> candidate.getSkuId().equals(refundItem.skuId()))
+                    .findFirst()
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "退款商品不属于订单"));
+                applyRefund(item, refundItem.quantity(), refundItem.refundAmount());
+            }
+        }
+        tradeOrderItemRepository.saveAll(items);
+        boolean fullRefund = items.stream().allMatch(item -> item.getRefundedQuantity() >= item.getQuantity());
+        OrderStateMachine.completeAftersale(order, LocalDateTime.now(), fullRefund);
         return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
     }
 
@@ -275,7 +315,7 @@ public class OrderService {
 
     private AftersaleOrderSnapshot toAftersaleSnapshot(TradeOrder order, List<TradeOrderItem> items) {
         boolean refundable = !items.isEmpty()
-            && items.stream().allMatch(item -> Boolean.TRUE.equals(item.getSupportRefund()));
+            && items.stream().anyMatch(item -> Boolean.TRUE.equals(item.getSupportRefund()) && item.getRefundableQuantity() > 0);
         return new AftersaleOrderSnapshot(
             order.getId(),
             order.getOrderNo(),
@@ -423,6 +463,10 @@ public class OrderService {
             orderItem.setPayAmount(item.totalAmount());
             orderItem.setSupportRefund(true);
             orderItem.setAftersaleQuantity(0);
+            orderItem.setRefundableQuantity(item.quantity());
+            orderItem.setRefundedQuantity(0);
+            orderItem.setRefundAmount(0);
+            orderItem.setRefundStatus("NONE");
             orderItem.setCreatedAt(now);
             savedItems.add(tradeOrderItemRepository.save(orderItem));
         }
@@ -556,8 +600,27 @@ public class OrderService {
             PriceFormatter.formatCents(item.getSalePrice()),
             item.getQuantity(),
             item.getPayAmount(),
-            PriceFormatter.formatCents(item.getPayAmount())
+            PriceFormatter.formatCents(item.getPayAmount()),
+            item.getRefundableQuantity(),
+            item.getRefundedQuantity(),
+            item.getAftersaleQuantity(),
+            item.getRefundAmount(),
+            PriceFormatter.formatCents(item.getRefundAmount()),
+            item.getRefundStatus()
         );
+    }
+
+    private void applyRefund(TradeOrderItem item, Integer quantity, Integer refundAmount) {
+        int refundQuantity = quantity == null ? 0 : quantity;
+        int availableQuantity = item.getQuantity() - item.getRefundedQuantity();
+        if (refundQuantity <= 0 || refundQuantity > availableQuantity) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "退款数量超过可退数量");
+        }
+        item.setAftersaleQuantity(item.getAftersaleQuantity() + refundQuantity);
+        item.setRefundedQuantity(item.getRefundedQuantity() + refundQuantity);
+        item.setRefundableQuantity(Math.max(item.getQuantity() - item.getRefundedQuantity(), 0));
+        item.setRefundAmount(item.getRefundAmount() + (refundAmount == null ? 0 : Math.max(refundAmount, 0)));
+        item.setRefundStatus(item.getRefundedQuantity() >= item.getQuantity() ? "REFUNDED" : "PARTIAL_REFUNDED");
     }
 
     private OrderAddressResponse toAddress(MemberAddress address) {

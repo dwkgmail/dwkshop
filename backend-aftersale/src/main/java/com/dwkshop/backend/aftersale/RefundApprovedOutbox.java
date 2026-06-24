@@ -1,6 +1,7 @@
 package com.dwkshop.backend.aftersale;
 
 import com.dwkshop.backend.domain.entity.AftersaleOrder;
+import com.dwkshop.backend.domain.entity.AftersaleOrderItem;
 import com.dwkshop.backend.domain.entity.AftersaleOutboxEvent;
 import com.dwkshop.backend.domain.repository.AftersaleOutboxEventRepository;
 import com.dwkshop.backend.event.RefundApprovedEvent;
@@ -22,20 +23,17 @@ public class RefundApprovedOutbox {
         this.objectMapper = objectMapper;
     }
 
-    public void append(AftersaleOrder aftersale, RefundOrderContext context, LocalDateTime approvedAt) {
+    public void append(AftersaleOrder aftersale, RefundOrderContext context, List<AftersaleOrderItem> refundItems, LocalDateTime approvedAt) {
         if (repository.existsByAggregateIdAndEventType(aftersale.getId(), EVENT_TYPE)) {
             return;
         }
         String eventId = UUID.randomUUID().toString();
-        List<RefundApprovedEvent.RefundItem> items = "WAIT_SHIP".equals(context.orderStatus())
-            ? context.items().stream()
-                .filter(item -> Boolean.TRUE.equals(item.supportRefund()))
-                .map(item -> new RefundApprovedEvent.RefundItem(item.skuId(), item.quantity()))
-                .toList()
-            : List.of();
+        List<RefundApprovedEvent.RefundItem> items = refundItems.stream()
+            .map(item -> new RefundApprovedEvent.RefundItem(item.getSkuId(), item.getQuantity(), item.getRefundAmount()))
+            .toList();
         RefundApprovedEvent event = new RefundApprovedEvent(
             eventId, aftersale.getAftersaleNo() + "-RELEASE", aftersale.getId(), aftersale.getAftersaleNo(),
-            aftersale.getOrderId(), context.orderStatus(), approvedAt, items
+            aftersale.getOrderId(), context.orderStatus(), aftersale.getRefundScope(), aftersale.getRefundAmount(), approvedAt, items
         );
         AftersaleOutboxEvent outbox = new AftersaleOutboxEvent();
         outbox.setEventId(eventId);

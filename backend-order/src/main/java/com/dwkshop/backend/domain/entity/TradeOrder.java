@@ -59,6 +59,8 @@ public class TradeOrder {
     @Column(nullable = false)
     private Integer couponAmount;
 
+    private Long couponUserId;
+
     @Column(nullable = false)
     private Integer pointAmount;
 

@@ -1,6 +1,7 @@
 package com.dwkshop.backend.marketing;
 
 import com.dwkshop.backend.marketing.dto.MarketingCouponSelectionResponse;
+import com.dwkshop.backend.marketing.dto.LockCouponRequest;
 import com.dwkshop.backend.marketing.dto.UseCouponRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,6 +31,15 @@ public class MarketingInternalController {
         return marketingService.selectCoupon(userId, requestedCouponUserId, productAmount);
     }
 
+    @PostMapping("/users/{userId}/coupons/{userCouponId}/lock")
+    public void lockCoupon(
+        @PathVariable Long userId,
+        @PathVariable Long userCouponId,
+        @Valid @RequestBody LockCouponRequest request
+    ) {
+        marketingService.lockCoupon(userId, userCouponId, request.lockKey(), request.productAmount());
+    }
+
     @PostMapping("/users/{userId}/coupons/{userCouponId}/use")
     public void useCoupon(
         @PathVariable Long userId,
@@ -37,5 +47,23 @@ public class MarketingInternalController {
         @Valid @RequestBody UseCouponRequest request
     ) {
         marketingService.useCoupon(userId, userCouponId, request.orderId());
+    }
+
+    @PostMapping("/users/{userId}/coupons/{userCouponId}/release")
+    public void releaseCoupon(
+        @PathVariable Long userId,
+        @PathVariable Long userCouponId,
+        @Valid @RequestBody UseCouponRequest request
+    ) {
+        marketingService.releaseCoupon(userId, userCouponId, request.orderId());
+    }
+
+    @PostMapping("/users/{userId}/coupons/{userCouponId}/refund")
+    public void refundCoupon(
+        @PathVariable Long userId,
+        @PathVariable Long userCouponId,
+        @Valid @RequestBody UseCouponRequest request
+    ) {
+        marketingService.refundCoupon(userId, userCouponId, request.orderId());
     }
 }

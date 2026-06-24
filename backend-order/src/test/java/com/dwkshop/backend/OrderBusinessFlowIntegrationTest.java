@@ -95,14 +95,14 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     @Test
-    void couponUseFailureRollsBackCreatedOrderAndOutbox() throws Exception {
+    void couponLockFailurePreventsOrderAndOutboxCreation() throws Exception {
         when(productCatalogClient.getSkuSnapshot(502L)).thenReturn(sku(502L, 5, 1000, true));
         when(marketingClient.selectCoupon(eq(1L), eq(9001L), anyInt())).thenReturn(new MarketingCouponSelection(
             9001L,
             300,
             List.of(new MarketingCoupon(9001L, 101L, "New User Coupon", "FULL_REDUCTION", 1000, 300, true))
         ));
-        doThrow(new IllegalStateException("coupon already used")).when(marketingClient).useCoupon(eq(1L), eq(9001L), org.mockito.ArgumentMatchers.anyLong());
+        doThrow(new IllegalStateException("coupon already used")).when(marketingClient).lockCoupon(eq(1L), eq(9001L), org.mockito.ArgumentMatchers.anyString(), eq(1000));
 
         String token = confirmToken("""
             {

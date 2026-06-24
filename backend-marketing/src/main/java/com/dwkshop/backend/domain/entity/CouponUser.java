@@ -39,5 +39,14 @@ public class CouponUser {
 
     private LocalDateTime usedAt;
 
+    private LocalDateTime lockedAt;
+
+    @Column(length = 96)
+    private String lockKey;
+
+    private LocalDateTime releasedAt;
+
+    private LocalDateTime refundedAt;
+
     private Long orderId;
 }

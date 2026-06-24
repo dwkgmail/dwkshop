@@ -45,4 +45,37 @@ public class MarketingClient {
             .toBodilessEntity()
             .block();
     }
+
+    public void lockCoupon(Long userId, Long userCouponId, String lockKey, int productAmount) {
+        webClient.post()
+            .uri("/internal/marketing/users/{userId}/coupons/{userCouponId}/lock", userId, userCouponId)
+            .bodyValue(new LockCouponRequest(lockKey, productAmount))
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.createException()
+                .map(ex -> new ResponseStatusException(response.statusCode(), "Coupon lock is unavailable")))
+            .toBodilessEntity()
+            .block();
+    }
+
+    public void releaseCoupon(Long userId, Long userCouponId, Long orderId) {
+        webClient.post()
+            .uri("/internal/marketing/users/{userId}/coupons/{userCouponId}/release", userId, userCouponId)
+            .bodyValue(new UseCouponRequest(orderId))
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.createException()
+                .map(ex -> new ResponseStatusException(response.statusCode(), "Coupon release is unavailable")))
+            .toBodilessEntity()
+            .block();
+    }
+
+    public void refundCoupon(Long userId, Long userCouponId, Long orderId) {
+        webClient.post()
+            .uri("/internal/marketing/users/{userId}/coupons/{userCouponId}/refund", userId, userCouponId)
+            .bodyValue(new UseCouponRequest(orderId))
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.createException()
+                .map(ex -> new ResponseStatusException(response.statusCode(), "Coupon refund is unavailable")))
+            .toBodilessEntity()
+            .block();
+    }
 }

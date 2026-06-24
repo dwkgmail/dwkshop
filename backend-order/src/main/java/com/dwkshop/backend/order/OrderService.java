@@ -30,7 +30,10 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -53,6 +56,7 @@ public class OrderService {
     private final MarketingClient marketingClient;
     private final ProductCatalogClient productCatalogClient;
     private final OrderInventoryOutbox inventoryOutbox;
+    private final TransactionTemplate transactionTemplate;
     private final Duration settlementTtl;
 
     public OrderService(
@@ -65,6 +69,7 @@ public class OrderService {
         MarketingClient marketingClient,
         ProductCatalogClient productCatalogClient,
         OrderInventoryOutbox inventoryOutbox,
+        TransactionTemplate transactionTemplate,
         @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
         this.tradeOrderRepository = tradeOrderRepository;
@@ -76,6 +81,7 @@ public class OrderService {
         this.marketingClient = marketingClient;
         this.productCatalogClient = productCatalogClient;
         this.inventoryOutbox = inventoryOutbox;
+        this.transactionTemplate = transactionTemplate;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
     }
 
@@ -90,7 +96,6 @@ public class OrderService {
         return response;
     }
 
-    @Transactional
     public OrderResponse create(Long userId, CreateOrderRequest request) {
         String clientRequestId = normalizeClientRequestId(request.clientRequestId());
         if (clientRequestId != null) {
@@ -117,7 +122,25 @@ public class OrderService {
             if (!session.expectedPayAmount().equals(request.expectedPayAmount())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单金额已变化，请重新确认");
             }
-            return persistOrder(userId, session.request(), calculation, request.remark(), clientRequestId);
+            String couponLockKey = couponLockKey(request.settlementToken(), clientRequestId);
+            boolean couponLocked = false;
+            OrderResponse response;
+            try {
+                if (calculation.selectedUserCouponId() != null) {
+                    marketingClient.lockCoupon(userId, calculation.selectedUserCouponId(), couponLockKey, calculation.amount().productAmount());
+                    couponLocked = true;
+                }
+                response = transactionTemplate.execute(status ->
+                    persistOrder(userId, session.request(), calculation, request.remark(), clientRequestId)
+                );
+            } catch (RuntimeException ex) {
+                if (couponLocked) {
+                    releaseCouponQuietly(userId, calculation.selectedUserCouponId(), null);
+                }
+                throw ex;
+            }
+            deleteCartItemsAfterCreate(userId, calculation);
+            return response;
         }
     }
 
@@ -149,36 +172,46 @@ public class OrderService {
         return toOrderResponse(order);
     }
 
-    @Transactional
     public OrderResponse cancel(Long userId, Long orderId) {
-        TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        LocalDateTime now = LocalDateTime.now();
-        OrderStateMachine.cancelUnpaid(order, now);
-        tradeOrderRepository.save(order);
-        inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
-            InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
-        return toOrderResponse(order);
-    }
-
-    @Transactional
-    public OrderResponse pay(Long userId, Long orderId) {
-        TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if (OrderStateMachine.PAY_PAID.equals(order.getPayStatus())) {
-            return toOrderResponse(order);
-        }
-        LocalDateTime now = LocalDateTime.now();
-        if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
-            OrderStateMachine.expirePayment(order, now);
+        OrderTransition transition = transactionTemplate.execute(status -> {
+            TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+            LocalDateTime now = LocalDateTime.now();
+            OrderStateMachine.cancelUnpaid(order, now);
             tradeOrderRepository.save(order);
             inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
                 InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
+            return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), false);
+        });
+        releaseCouponIfPresent(userId, transition.couponUserId(), orderId);
+        return transition.response();
+    }
+
+    public OrderResponse pay(Long userId, Long orderId) {
+        OrderTransition transition = transactionTemplate.execute(status -> {
+            TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+            if (OrderStateMachine.PAY_PAID.equals(order.getPayStatus())) {
+                return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), false);
+            }
+            LocalDateTime now = LocalDateTime.now();
+            if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
+                OrderStateMachine.expirePayment(order, now);
+                tradeOrderRepository.save(order);
+                inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
+                    InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
+                return new OrderTransition(null, order.getCouponUserId(), true);
+            }
+            OrderStateMachine.pay(order, now);
+            tradeOrderRepository.save(order);
+            return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), false);
+        });
+        if (transition.expired()) {
+            releaseCouponIfPresent(userId, transition.couponUserId(), orderId);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单支付已超时");
         }
-        OrderStateMachine.pay(order, now);
-        tradeOrderRepository.save(order);
-        return toOrderResponse(order);
+        useCouponIfPresent(userId, transition.couponUserId(), orderId);
+        return transition.response();
     }
 
     @Transactional
@@ -285,7 +318,9 @@ public class OrderService {
         }
         tradeOrderItemRepository.saveAll(items);
         OrderStateMachine.completeAftersale(order, LocalDateTime.now());
-        return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
+        TradeOrder savedOrder = tradeOrderRepository.save(order);
+        refundCouponAfterCommit(savedOrder.getUserId(), savedOrder.getCouponUserId(), savedOrder.getId(), true);
+        return toAftersaleSnapshot(savedOrder, items);
     }
 
     @Transactional
@@ -313,7 +348,9 @@ public class OrderService {
         tradeOrderItemRepository.saveAll(items);
         boolean fullRefund = items.stream().allMatch(item -> item.getRefundedQuantity() >= item.getQuantity());
         OrderStateMachine.completeAftersale(order, LocalDateTime.now(), fullRefund);
-        return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
+        TradeOrder savedOrder = tradeOrderRepository.save(order);
+        refundCouponAfterCommit(savedOrder.getUserId(), savedOrder.getCouponUserId(), savedOrder.getId(), fullRefund);
+        return toAftersaleSnapshot(savedOrder, items);
     }
 
     private AftersaleOrderSnapshot toAftersaleSnapshot(TradeOrder order) {
@@ -443,6 +480,7 @@ public class OrderService {
         order.setTotalAmount(calculation.amount().productAmount());
         order.setDiscountAmount(calculation.amount().productDiscountAmount());
         order.setCouponAmount(calculation.amount().couponDiscountAmount());
+        order.setCouponUserId(calculation.selectedUserCouponId());
         order.setPointAmount(calculation.amount().pointDiscountAmount());
         order.setFreightAmount(calculation.amount().freightAmount());
         order.setPayAmount(calculation.amount().payAmount());
@@ -493,20 +531,61 @@ public class OrderService {
 
         inventoryOutbox.append(savedOrder, savedItems, InventoryIntegrationEvent.ORDER_CREATED, 1, now);
 
-        if (calculation.selectedUserCouponId() != null) {
-            marketingClient.useCoupon(userId, calculation.selectedUserCouponId(), savedOrder.getId());
-        }
-
-        if (CART.equals(calculation.sourceType())) {
-            // 购物车来源的订单创建成功后，再删除对应购物车项。
-            List<Long> cartItemIds = calculation.items().stream()
-                .map(SettlementItem::cartItemId)
-                .filter(id -> id != null)
-                .toList();
-            cartClient.deleteItems(userId, cartItemIds);
-        }
-
         return toOrderResponse(savedOrder);
+    }
+
+    private void deleteCartItemsAfterCreate(Long userId, SettlementCalculation calculation) {
+        if (!CART.equals(calculation.sourceType())) {
+            return;
+        }
+        List<Long> cartItemIds = calculation.items().stream()
+            .map(SettlementItem::cartItemId)
+            .filter(id -> id != null)
+            .toList();
+        cartClient.deleteItems(userId, cartItemIds);
+    }
+
+    private String couponLockKey(String settlementToken, String clientRequestId) {
+        if (clientRequestId != null) {
+            return "ORDER:" + clientRequestId;
+        }
+        return "SETTLEMENT:" + settlementToken;
+    }
+
+    private void useCouponIfPresent(Long userId, Long userCouponId, Long orderId) {
+        if (userCouponId != null) {
+            marketingClient.useCoupon(userId, userCouponId, orderId);
+        }
+    }
+
+    private void releaseCouponIfPresent(Long userId, Long userCouponId, Long orderId) {
+        if (userCouponId != null) {
+            marketingClient.releaseCoupon(userId, userCouponId, orderId);
+        }
+    }
+
+    private void releaseCouponQuietly(Long userId, Long userCouponId, Long orderId) {
+        try {
+            releaseCouponIfPresent(userId, userCouponId, orderId);
+        } catch (RuntimeException ignored) {
+            // Best-effort compensation after local order creation fails.
+        }
+    }
+
+    private void refundCouponAfterCommit(Long userId, Long userCouponId, Long orderId, boolean fullRefund) {
+        if (!fullRefund || userCouponId == null) {
+            return;
+        }
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            marketingClient.refundCoupon(userId, userCouponId, orderId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                marketingClient.refundCoupon(userId, userCouponId, orderId);
+            }
+        });
     }
 
     private OrderResponse findIdempotentOrder(Long userId, String clientRequestId) {
@@ -744,6 +823,9 @@ public class OrderService {
     }
 
     private record PointSelection(boolean visible, int availablePoints, int deductionAmount, boolean selected) {
+    }
+
+    private record OrderTransition(OrderResponse response, Long couponUserId, boolean expired) {
     }
 
 }

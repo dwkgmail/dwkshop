@@ -42,14 +42,6 @@ public class OrderService {
     private static final int NORMAL_FREIGHT = 0;
     private static final int COLD_CHAIN_FREIGHT = 1000;
     private static final int POINT_EXCHANGE_RATE = 100;
-    private static final String DELIVERY_UNSHIPPED = "UNSHIPPED";
-    private static final String DELIVERY_SHIPPED = "SHIPPED";
-    private static final String DELIVERY_IN_TRANSIT = "IN_TRANSIT";
-    private static final String DELIVERY_DELIVERED = "DELIVERED";
-    private static final String AFTERSALE_NONE = "NONE";
-    private static final String AFTERSALE_APPLYING = "APPLYING";
-    private static final String AFTERSALE_REJECTED = "REJECTED";
-    private static final String AFTERSALE_REFUNDED = "REFUNDED";
 
     private final TradeOrderRepository tradeOrderRepository;
     private final TradeOrderItemRepository tradeOrderItemRepository;
@@ -153,16 +145,11 @@ public class OrderService {
     public OrderResponse cancel(Long userId, Long orderId) {
         TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if (!"WAIT_PAY".equals(order.getOrderStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前订单不可取消");
-        }
-        order.setOrderStatus("CANCELED");
-        order.setPayStatus("CLOSED");
-        order.setCancelTime(LocalDateTime.now());
-        order.setUpdatedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        OrderStateMachine.cancelUnpaid(order, now);
         tradeOrderRepository.save(order);
         inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
-            InventoryIntegrationEvent.ORDER_CANCELLED, 2, order.getCancelTime());
+            InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
         return toOrderResponse(order);
     }
 
@@ -170,28 +157,18 @@ public class OrderService {
     public OrderResponse pay(Long userId, Long orderId) {
         TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if ("PAID".equals(order.getPayStatus())) {
+        if (OrderStateMachine.PAY_PAID.equals(order.getPayStatus())) {
             return toOrderResponse(order);
-        }
-        if (!"WAIT_PAY".equals(order.getOrderStatus()) || !"UNPAID".equals(order.getPayStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前订单不可支付");
         }
         LocalDateTime now = LocalDateTime.now();
         if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
-            order.setOrderStatus("CANCELED");
-            order.setPayStatus("CLOSED");
-            order.setCancelTime(now);
-            order.setUpdatedAt(now);
+            OrderStateMachine.expirePayment(order, now);
             tradeOrderRepository.save(order);
             inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
                 InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单支付已超时");
         }
-        order.setOrderStatus("WAIT_SHIP");
-        order.setPayStatus("PAID");
-        order.setDeliveryStatus(DELIVERY_UNSHIPPED);
-        order.setPayTime(now);
-        order.setUpdatedAt(now);
+        OrderStateMachine.pay(order, now);
         tradeOrderRepository.save(order);
         return toOrderResponse(order);
     }
@@ -200,17 +177,11 @@ public class OrderService {
     public OrderResponse shipOrder(Long orderId, AdminShipOrderRequest request) {
         TradeOrder order = tradeOrderRepository.findById(orderId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if (!"WAIT_SHIP".equals(order.getOrderStatus()) || !"PAID".equals(order.getPayStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前订单不可发货");
-        }
         LocalDateTime now = LocalDateTime.now();
-        order.setOrderStatus("WAIT_RECEIVE");
-        order.setDeliveryStatus(DELIVERY_SHIPPED);
+        OrderStateMachine.ship(order, now);
         order.setLogisticsCompany(normalizeOptionalText(request.logisticsCompany()));
         order.setLogisticsNo(normalizeOptionalText(request.logisticsNo()));
         order.setDeliveryRemark(normalizeOptionalText(request.deliveryRemark()));
-        order.setDeliveryTime(now);
-        order.setUpdatedAt(now);
         tradeOrderRepository.save(order);
         return toOrderResponse(order);
     }
@@ -219,20 +190,10 @@ public class OrderService {
     public OrderResponse updateDeliveryStatus(Long orderId, AdminUpdateDeliveryStatusRequest request) {
         TradeOrder order = tradeOrderRepository.findById(orderId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if (DELIVERY_UNSHIPPED.equals(order.getDeliveryStatus()) || order.getDeliveryTime() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单尚未发货");
-        }
         String targetStatus = normalizeDeliveryStatus(request.deliveryStatus());
         LocalDateTime now = LocalDateTime.now();
-        order.setDeliveryStatus(targetStatus);
+        OrderStateMachine.updateDelivery(order, targetStatus, now);
         order.setDeliveryRemark(normalizeOptionalText(request.deliveryRemark()));
-        if (DELIVERY_DELIVERED.equals(targetStatus)) {
-            order.setOrderStatus("FINISHED");
-            order.setFinishTime(now);
-        } else {
-            order.setOrderStatus("WAIT_RECEIVE");
-        }
-        order.setUpdatedAt(now);
         tradeOrderRepository.save(order);
         return toOrderResponse(order);
     }
@@ -248,21 +209,11 @@ public class OrderService {
     public AftersaleOrderSnapshot applyAftersale(Long orderId, Long userId) {
         TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if (!"PAID".equals(order.getPayStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "只有已支付订单可以申请退款");
-        }
-        if (AFTERSALE_REFUNDED.equals(order.getOrderStatus()) || AFTERSALE_REFUNDED.equals(order.getAftersaleStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已退款");
-        }
-        if (!AFTERSALE_NONE.equals(order.getAftersaleStatus()) && !AFTERSALE_REJECTED.equals(order.getAftersaleStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已有处理中的售后申请");
-        }
         List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
         if (items.isEmpty() || items.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getSupportRefund()))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单不支持退款");
         }
-        order.setAftersaleStatus(AFTERSALE_APPLYING);
-        order.setUpdatedAt(LocalDateTime.now());
+        OrderStateMachine.applyAftersale(order, LocalDateTime.now());
         return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
     }
 
@@ -275,11 +226,7 @@ public class OrderService {
     public AftersaleOrderSnapshot rejectAftersale(Long orderId) {
         TradeOrder order = tradeOrderRepository.findById(orderId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if (!AFTERSALE_APPLYING.equals(order.getAftersaleStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单售后状态不是处理中");
-        }
-        order.setAftersaleStatus(AFTERSALE_REJECTED);
-        order.setUpdatedAt(LocalDateTime.now());
+        OrderStateMachine.rejectAftersale(order, LocalDateTime.now());
         return toAftersaleSnapshot(tradeOrderRepository.save(order));
     }
 
@@ -310,21 +257,15 @@ public class OrderService {
     public AftersaleOrderSnapshot completeAftersale(Long orderId) {
         TradeOrder order = tradeOrderRepository.findById(orderId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
-        if (AFTERSALE_REFUNDED.equals(order.getAftersaleStatus())) {
+        if (OrderStateMachine.AFTERSALE_REFUNDED.equals(order.getAftersaleStatus())) {
             return toAftersaleSnapshot(order);
-        }
-        if (!AFTERSALE_APPLYING.equals(order.getAftersaleStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单售后状态不是处理中");
         }
         List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
         for (TradeOrderItem item : items) {
             item.setAftersaleQuantity(item.getQuantity());
         }
         tradeOrderItemRepository.saveAll(items);
-        order.setOrderStatus(AFTERSALE_REFUNDED);
-        order.setPayStatus(AFTERSALE_REFUNDED);
-        order.setAftersaleStatus(AFTERSALE_REFUNDED);
-        order.setUpdatedAt(LocalDateTime.now());
+        OrderStateMachine.completeAftersale(order, LocalDateTime.now());
         return toAftersaleSnapshot(tradeOrderRepository.save(order), items);
     }
 
@@ -449,10 +390,7 @@ public class OrderService {
         TradeOrder order = new TradeOrder();
         order.setOrderNo("SO" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(now) + UUID.randomUUID().toString().substring(0, 6).toUpperCase());
         order.setUserId(userId);
-        order.setOrderStatus("WAIT_PAY");
-        order.setPayStatus("UNPAID");
-        order.setDeliveryStatus(DELIVERY_UNSHIPPED);
-        order.setAftersaleStatus("NONE");
+        OrderStateMachine.initializeCreated(order);
         order.setSourceType(calculation.sourceType());
         order.setTotalAmount(calculation.amount().productAmount());
         order.setDiscountAmount(calculation.amount().productDiscountAmount());
@@ -681,9 +619,9 @@ public class OrderService {
 
     private String normalizeDeliveryStatus(String status) {
         return switch (status == null ? "" : status.trim().toUpperCase()) {
-            case DELIVERY_SHIPPED -> DELIVERY_SHIPPED;
-            case DELIVERY_IN_TRANSIT -> DELIVERY_IN_TRANSIT;
-            case DELIVERY_DELIVERED -> DELIVERY_DELIVERED;
+            case OrderStateMachine.DELIVERY_SHIPPED -> OrderStateMachine.DELIVERY_SHIPPED;
+            case OrderStateMachine.DELIVERY_IN_TRANSIT -> OrderStateMachine.DELIVERY_IN_TRANSIT;
+            case OrderStateMachine.DELIVERY_DELIVERED -> OrderStateMachine.DELIVERY_DELIVERED;
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的配送状态");
         };
     }

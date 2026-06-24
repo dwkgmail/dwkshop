@@ -449,7 +449,7 @@ class BackendApplicationTests {
 
         mockMvc.perform(get("/api/orders/{id}", orderId))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.orderStatus").value("REFUNDED"))
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"))
             .andExpect(jsonPath("$.payStatus").value("REFUNDED"))
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
         assertThat(jdbcTemplate.queryForObject("select stock from product_sku where id = 1", Integer.class)).isEqualTo(120);

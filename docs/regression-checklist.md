@@ -170,7 +170,7 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8080/admin/aftersales/$($a
 - [ ] 用户提交售后成功，状态为 `APPLYING`，订单号、退款金额和原因正确。
 - [ ] 同一订单存在处理中或已退款售后时，重复申请被拒绝。
 - [ ] 管理后台能查询到该售后。
-- [ ] 管理员审核通过后，售后状态为 `REFUNDED`，订单退款状态同步更新。
+- [ ] 管理员审核通过后，`payStatus=REFUNDED`、`aftersaleStatus=REFUNDED` 同步更新，`orderStatus` 不因售后退款被改成 `REFUNDED`。
 - [ ] `dwkshop_aftersale.aftersale_outbox_event` 产生 `REFUND_APPROVED`，数秒后状态变为 `SENT`。
 - [ ] 商品服务消费退款事件后释放对应锁定库存，且重复消费不重复释放。
 - [ ] 另建一笔订单验证“拒绝售后”：状态变为 `REJECTED`，拒绝原因保存，不能再审核通过。

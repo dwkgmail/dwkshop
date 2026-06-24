@@ -113,10 +113,12 @@ class OrderInternalApiIntegrationTest {
         mockMvc.perform(post("/internal/orders/{orderId}/aftersale/approve", orderId)
                 .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET))
             .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"))
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
             .andExpect(jsonPath("$.payStatus").value("REFUNDED"));
 
         TradeOrder refundedOrder = tradeOrderRepository.findById(orderId).orElseThrow();
+        assertThat(refundedOrder.getOrderStatus()).isEqualTo("WAIT_SHIP");
         assertThat(refundedOrder.getAftersaleStatus()).isEqualTo("REFUNDED");
         assertThat(refundedOrder.getPayStatus()).isEqualTo("REFUNDED");
 

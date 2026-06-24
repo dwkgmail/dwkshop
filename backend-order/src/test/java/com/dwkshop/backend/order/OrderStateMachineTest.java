@@ -78,14 +78,14 @@ class OrderStateMachineTest {
         boolean changed = OrderStateMachine.completeAftersale(order, NOW.plusMinutes(3));
 
         assertThat(changed).isTrue();
-        assertThat(order.getOrderStatus()).isEqualTo("REFUNDED");
+        assertThat(order.getOrderStatus()).isEqualTo("WAIT_SHIP");
         assertThat(order.getPayStatus()).isEqualTo("REFUNDED");
         assertThat(order.getAftersaleStatus()).isEqualTo("REFUNDED");
     }
 
     @Test
     void completeAftersaleIsIdempotentForRefundedOrder() {
-        TradeOrder order = order("REFUNDED", "REFUNDED", "UNSHIPPED", "REFUNDED");
+        TradeOrder order = order("FINISHED", "REFUNDED", "DELIVERED", "REFUNDED");
 
         boolean changed = OrderStateMachine.completeAftersale(order, NOW);
 

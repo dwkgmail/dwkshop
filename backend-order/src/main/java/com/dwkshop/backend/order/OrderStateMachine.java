@@ -12,7 +12,6 @@ final class OrderStateMachine {
     static final String ORDER_WAIT_RECEIVE = "WAIT_RECEIVE";
     static final String ORDER_FINISHED = "FINISHED";
     static final String ORDER_CANCELED = "CANCELED";
-    static final String ORDER_REFUNDED = "REFUNDED";
 
     static final String PAY_UNPAID = "UNPAID";
     static final String PAY_PAID = "PAID";
@@ -86,7 +85,7 @@ final class OrderStateMachine {
 
     static void applyAftersale(TradeOrder order, LocalDateTime now) {
         require(PAY_PAID.equals(order.getPayStatus()), "只有已支付订单可以申请退款");
-        require(!ORDER_REFUNDED.equals(order.getOrderStatus()) && !AFTERSALE_REFUNDED.equals(order.getAftersaleStatus()), "订单已退款");
+        require(!AFTERSALE_REFUNDED.equals(order.getAftersaleStatus()), "订单已退款");
         require(AFTERSALE_NONE.equals(order.getAftersaleStatus()) || AFTERSALE_REJECTED.equals(order.getAftersaleStatus()), "订单已有处理中的售后申请");
         order.setAftersaleStatus(AFTERSALE_APPLYING);
         order.setUpdatedAt(now);
@@ -103,7 +102,6 @@ final class OrderStateMachine {
             return false;
         }
         require(AFTERSALE_APPLYING.equals(order.getAftersaleStatus()), "订单售后状态不是处理中");
-        order.setOrderStatus(ORDER_REFUNDED);
         order.setPayStatus(PAY_REFUNDED);
         order.setAftersaleStatus(AFTERSALE_REFUNDED);
         order.setUpdatedAt(now);

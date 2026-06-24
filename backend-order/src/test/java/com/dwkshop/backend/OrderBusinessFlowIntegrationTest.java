@@ -224,7 +224,7 @@ class OrderBusinessFlowIntegrationTest {
 
         TradeOrder refunded = tradeOrderRepository.findById(order.getId()).orElseThrow();
         TradeOrderAmount amount = tradeOrderAmountRepository.findByOrderId(order.getId()).orElseThrow();
-        assertThat(refunded.getOrderStatus()).isEqualTo("REFUNDED");
+        assertThat(refunded.getOrderStatus()).isEqualTo("WAIT_SHIP");
         assertThat(refunded.getPayStatus()).isEqualTo("REFUNDED");
         assertThat(amount.getPointDiscountAmount()).isEqualTo(500);
     }

@@ -56,7 +56,7 @@ public class AftersaleService {
         if (!"PAID".equals(order.getPayStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only paid orders can request refund");
         }
-        if (REFUNDED.equals(order.getOrderStatus()) || REFUNDED.equals(order.getAftersaleStatus())) {
+        if (REFUNDED.equals(order.getAftersaleStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order already refunded");
         }
         aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(order.getId(), List.of(APPLYING, REFUNDED))
@@ -127,7 +127,6 @@ public class AftersaleService {
             tradeOrderItemRepository.save(item);
         }
 
-        order.setOrderStatus(REFUNDED);
         order.setPayStatus(REFUNDED);
         order.setAftersaleStatus(REFUNDED);
         order.setUpdatedAt(now);

@@ -2,12 +2,14 @@
 
 The order aggregate stores four status dimensions:
 
-| Field | Values |
+| Field | Current values |
 | --- | --- |
-| `orderStatus` | `WAIT_PAY`, `WAIT_SHIP`, `WAIT_RECEIVE`, `FINISHED`, `CANCELED`, `REFUNDED` |
+| `orderStatus` | `WAIT_PAY`, `WAIT_SHIP`, `WAIT_RECEIVE`, `FINISHED`, `CANCELED` |
 | `payStatus` | `UNPAID`, `PAID`, `CLOSED`, `REFUNDED` |
 | `deliveryStatus` | `UNSHIPPED`, `SHIPPED`, `IN_TRANSIT`, `DELIVERED` |
 | `aftersaleStatus` | `NONE`, `APPLYING`, `REJECTED`, `REFUNDED` |
+
+Next-state refinements should stay in these non-primary dimensions: add `PARTIAL_REFUNDED` to `payStatus`, and add review/refund progress states such as `APPROVED`, `REFUNDING`, and `PARTIAL_REFUNDED` to `aftersaleStatus`.
 
 ## Primary flow
 
@@ -19,9 +21,9 @@ stateDiagram-v2
     WAIT_SHIP --> WAIT_RECEIVE: admin ship
     WAIT_RECEIVE --> WAIT_RECEIVE: delivery update to IN_TRANSIT
     WAIT_RECEIVE --> FINISHED: delivery update to DELIVERED
-    WAIT_SHIP --> REFUNDED: refund approved before shipment
-    WAIT_RECEIVE --> REFUNDED: refund approved after shipment
 ```
+
+Refunds and returns are modeled as payment/aftersale state, not as a main order flow state. For example, a delivered order can stay `orderStatus=FINISHED` while `payStatus=REFUNDED` and `aftersaleStatus=REFUNDED` after a full aftersale refund.
 
 ## Transition table
 
@@ -33,13 +35,14 @@ stateDiagram-v2
 | pay expired order | `WAIT_PAY` and `UNPAID` after expiry | `orderStatus=CANCELED`, `payStatus=CLOSED`, `cancelTime` set; inventory cancel event outbox row created |
 | ship order | `WAIT_SHIP` and `PAID` | `orderStatus=WAIT_RECEIVE`, `deliveryStatus=SHIPPED`, logistics fields and `deliveryTime` set |
 | update delivery | shipped order with delivery time | `deliveryStatus=SHIPPED`, `IN_TRANSIT`, or `DELIVERED`; `DELIVERED` also sets `orderStatus=FINISHED` and `finishTime` |
-| request aftersale | paid order, not already refunded, aftersale status is `NONE` or `REJECTED` | `aftersaleStatus=APPLYING` |
+| request aftersale | paid order, aftersale status is `NONE` or `REJECTED` | `aftersaleStatus=APPLYING` |
 | reject aftersale | `aftersaleStatus=APPLYING` | `aftersaleStatus=REJECTED` |
-| approve refund | `aftersaleStatus=APPLYING` | `orderStatus=REFUNDED`, `payStatus=REFUNDED`, `aftersaleStatus=REFUNDED`; refund event drives inventory release |
+| approve refund | `aftersaleStatus=APPLYING` | `orderStatus` is unchanged; `payStatus=REFUNDED`, `aftersaleStatus=REFUNDED`; refund event drives inventory release |
 
 ## Invariants
 
-- `REFUNDED`, `CANCELED`, and `FINISHED` are terminal for the main order flow.
+- `CANCELED` and `FINISHED` are terminal for the main order flow.
+- `REFUNDED` and `PARTIAL_REFUNDED` belong to the payment and aftersale dimensions; they do not imply changing `orderStatus`.
 - A paid order cannot be cancelled through the unpaid cancel path.
 - Delivery cannot be updated until the order has been shipped.
 - Refund approval is idempotent when `aftersaleStatus=REFUNDED`.

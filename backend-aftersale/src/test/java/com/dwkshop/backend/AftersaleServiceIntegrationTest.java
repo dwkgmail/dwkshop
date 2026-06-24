@@ -150,7 +150,7 @@ class AftersaleServiceIntegrationTest {
             )
         );
         when(orderClient.getAftersaleSnapshot(102L)).thenReturn(
-            new AftersaleOrderSnapshot(102L, "SO202606180102", 1L, "13800000002", "REFUNDED", "REFUNDED", "REFUNDED", 9900, true)
+            new AftersaleOrderSnapshot(102L, "SO202606180102", 1L, "13800000002", "WAIT_SHIP", "REFUNDED", "REFUNDED", 9900, true)
         );
 
         mockMvc.perform(post("/api/aftersales")

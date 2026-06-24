@@ -204,7 +204,7 @@ public class AftersaleService {
 
     private AftersaleOrderSnapshot approvedOrderSnapshot(RefundOrderContext context) {
         return new AftersaleOrderSnapshot(
-            context.orderId(), context.orderNo(), context.userId(), null, "REFUNDED", "REFUNDED", "REFUNDED",
+            context.orderId(), context.orderNo(), context.userId(), null, context.orderStatus(), "REFUNDED", "REFUNDED",
             context.payAmount(), context.refundable()
         );
     }

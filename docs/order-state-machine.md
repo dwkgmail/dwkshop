@@ -1,6 +1,6 @@
 # Order state machine
 
-The order aggregate stores four status dimensions:
+The order aggregate stores five status dimensions:
 
 | Field | Current values |
 | --- | --- |
@@ -8,6 +8,7 @@ The order aggregate stores four status dimensions:
 | `payStatus` | `UNPAID`, `PAID`, `CLOSED`, `REFUNDED` |
 | `deliveryStatus` | `UNSHIPPED`, `SHIPPED`, `IN_TRANSIT`, `DELIVERED` |
 | `aftersaleStatus` | `NONE`, `APPLYING`, `REJECTED`, `REFUNDED` |
+| `inventoryStatus` | `LOCK_PENDING`, `LOCKED`, `LOCK_FAILED`, `RELEASE_PENDING`, `RELEASED` |
 
 Next-state refinements should stay in these non-primary dimensions: add `PARTIAL_REFUNDED` to `payStatus`, and add review/refund progress states such as `APPROVED`, `REFUNDING`, and `PARTIAL_REFUNDED` to `aftersaleStatus`.
 
@@ -16,8 +17,8 @@ Next-state refinements should stay in these non-primary dimensions: add `PARTIAL
 ```mermaid
 stateDiagram-v2
     [*] --> WAIT_PAY: create order
-    WAIT_PAY --> CANCELED: user cancel or pay timeout
-    WAIT_PAY --> WAIT_SHIP: pay success
+    WAIT_PAY --> CANCELED: user cancel, pay timeout, or inventory lock failed
+    WAIT_PAY --> WAIT_SHIP: pay success after inventory locked
     WAIT_SHIP --> WAIT_RECEIVE: admin ship
     WAIT_RECEIVE --> WAIT_RECEIVE: delivery update to IN_TRANSIT
     WAIT_RECEIVE --> FINISHED: delivery update to DELIVERED
@@ -29,21 +30,27 @@ Refunds and returns are modeled as payment/aftersale state, not as a main order 
 
 | Transition | Preconditions | Side effects |
 | --- | --- | --- |
-| create order | cart and settlement data valid | `orderStatus=WAIT_PAY`, `payStatus=UNPAID`, `deliveryStatus=UNSHIPPED`, `aftersaleStatus=NONE`; inventory lock event outbox row created |
-| cancel unpaid order | `WAIT_PAY` and `UNPAID` | `orderStatus=CANCELED`, `payStatus=CLOSED`, `cancelTime` set; inventory cancel event outbox row created |
-| pay order | `WAIT_PAY` and `UNPAID` before expiry | `orderStatus=WAIT_SHIP`, `payStatus=PAID`, `deliveryStatus=UNSHIPPED`, `payTime` set |
-| pay expired order | `WAIT_PAY` and `UNPAID` after expiry | `orderStatus=CANCELED`, `payStatus=CLOSED`, `cancelTime` set; inventory cancel event outbox row created |
+| create order | cart and settlement data valid | `orderStatus=WAIT_PAY`, `payStatus=UNPAID`, `deliveryStatus=UNSHIPPED`, `aftersaleStatus=NONE`, `inventoryStatus=LOCK_PENDING`; inventory lock event outbox row created |
+| inventory locked | `WAIT_PAY`, `UNPAID`, and `LOCK_PENDING` | `inventoryStatus=LOCKED`; order remains payable |
+| inventory lock failed | `WAIT_PAY`, `UNPAID`, and `LOCK_PENDING` | `orderStatus=CANCELED`, `payStatus=CLOSED`, `inventoryStatus=LOCK_FAILED`, `cancelTime` set, cancel reason set to stock shortage; release locked coupon and reserved points |
+| cancel unpaid order | `WAIT_PAY`, `UNPAID`, and inventory is not `LOCK_FAILED` | `orderStatus=CANCELED`, `payStatus=CLOSED`, `cancelTime` set, `inventoryStatus=RELEASE_PENDING` when stock had been locked or lock may still arrive; inventory cancel event outbox row created |
+| inventory released | `RELEASE_PENDING` | `inventoryStatus=RELEASED` |
+| pay order | `WAIT_PAY`, `UNPAID`, `inventoryStatus=LOCKED`, and before expiry | `orderStatus=WAIT_SHIP`, `payStatus=PAID`, `deliveryStatus=UNSHIPPED`, `payTime` set |
+| pay expired order | `WAIT_PAY` and `UNPAID` after expiry | `orderStatus=CANCELED`, `payStatus=CLOSED`, `cancelTime` set, `inventoryStatus=RELEASE_PENDING` when needed; inventory cancel event outbox row created |
 | ship order | `WAIT_SHIP` and `PAID` | `orderStatus=WAIT_RECEIVE`, `deliveryStatus=SHIPPED`, logistics fields and `deliveryTime` set |
 | update delivery | shipped order with delivery time | `deliveryStatus=SHIPPED`, `IN_TRANSIT`, or `DELIVERED`; `DELIVERED` also sets `orderStatus=FINISHED` and `finishTime` |
 | request aftersale | paid order, aftersale status is `NONE` or `REJECTED` | `aftersaleStatus=APPLYING` |
 | reject aftersale | `aftersaleStatus=APPLYING` | `aftersaleStatus=REJECTED` |
-| approve refund | `aftersaleStatus=APPLYING` | `orderStatus` is unchanged; `payStatus=REFUNDED`, `aftersaleStatus=REFUNDED`; refund event drives inventory release |
+| approve refund | `aftersaleStatus=APPLYING` | `orderStatus` is unchanged; `payStatus=REFUNDED`, `aftersaleStatus=REFUNDED`, `inventoryStatus=RELEASE_PENDING` when refundable locked stock exists; refund event drives inventory release |
 
 ## Invariants
 
 - `CANCELED` and `FINISHED` are terminal for the main order flow.
 - `REFUNDED` and `PARTIAL_REFUNDED` belong to the payment and aftersale dimensions; they do not imply changing `orderStatus`.
 - A paid order cannot be cancelled through the unpaid cancel path.
+- A pending payment order is payable only after `inventoryStatus=LOCKED`.
+- `LOCK_FAILED` closes an unpaid order automatically and releases coupon/point reservations.
+- A late payment callback must not move a `CANCELED` or `LOCK_FAILED` order to `WAIT_SHIP`; it should enter payment reversal or refund handling.
 - Delivery cannot be updated until the order has been shipped.
 - Refund approval is idempotent when `aftersaleStatus=REFUNDED`.
 - Inventory events are published from outbox tables and are safe to retry.

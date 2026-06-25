@@ -96,6 +96,14 @@ class OrderInternalApiIntegrationTest {
             .andExpect(jsonPath("$.items.length()").value(1))
             .andExpect(jsonPath("$.items[0].skuId").value(501))
             .andExpect(jsonPath("$.items[0].supportRefund").value(true));
+
+        mockMvc.perform(get("/internal/orders/inventory-reconciliation/summaries")
+                .param("orderIds", orderId.toString())
+                .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value(orderId))
+            .andExpect(jsonPath("$[0].orderNo").value("SO202606180001"))
+            .andExpect(jsonPath("$[0].orderStatus").value("WAIT_SHIP"));
     }
 
     @Test

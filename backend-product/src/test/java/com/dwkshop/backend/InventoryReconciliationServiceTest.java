@@ -7,15 +7,22 @@ import com.dwkshop.backend.domain.repository.InventoryOrderItemStateRepository;
 import com.dwkshop.backend.domain.repository.InventoryReconciliationRepairRecordRepository;
 import com.dwkshop.backend.domain.repository.ProductRepository;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
+import com.dwkshop.backend.product.InventoryOrderHealth;
+import com.dwkshop.backend.product.OrderClient;
 import com.dwkshop.backend.product.InventoryReconciliationService;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.when;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -27,8 +34,12 @@ class InventoryReconciliationServiceTest {
     @Autowired InventoryOrderItemStateRepository stateRepository;
     @Autowired InventoryReconciliationRepairRecordRepository repairRecordRepository;
 
+    @MockBean OrderClient orderClient;
+
     @BeforeEach
     void clean() {
+        when(orderClient.getInventoryOrderSummaries(anyList())).thenReturn(List.of());
+        when(orderClient.getInventoryOrderHealth(anyInt())).thenReturn(new InventoryOrderHealth(0, List.of()));
         repairRecordRepository.deleteAllInBatch();
         stateRepository.deleteAllInBatch();
         skuRepository.deleteAllInBatch();

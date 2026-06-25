@@ -3,6 +3,7 @@ package com.dwkshop.backend.order;
 import com.dwkshop.backend.domain.entity.TradeOrder;
 import com.dwkshop.backend.domain.entity.TradeOrderAmount;
 import com.dwkshop.backend.domain.entity.TradeOrderItem;
+import com.dwkshop.backend.domain.repository.OrderOutboxEventRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
@@ -25,8 +26,10 @@ import com.dwkshop.backend.util.PriceFormatter;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -50,6 +53,7 @@ public class OrderService {
     private final TradeOrderRepository tradeOrderRepository;
     private final TradeOrderItemRepository tradeOrderItemRepository;
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
+    private final OrderOutboxEventRepository orderOutboxEventRepository;
     private final SettlementSessionStore settlementSessionStore;
     private final CartClient cartClient;
     private final MemberClient memberClient;
@@ -63,6 +67,7 @@ public class OrderService {
         TradeOrderRepository tradeOrderRepository,
         TradeOrderItemRepository tradeOrderItemRepository,
         TradeOrderAmountRepository tradeOrderAmountRepository,
+        OrderOutboxEventRepository orderOutboxEventRepository,
         SettlementSessionStore settlementSessionStore,
         CartClient cartClient,
         MemberClient memberClient,
@@ -75,6 +80,7 @@ public class OrderService {
         this.tradeOrderRepository = tradeOrderRepository;
         this.tradeOrderItemRepository = tradeOrderItemRepository;
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
+        this.orderOutboxEventRepository = orderOutboxEventRepository;
         this.settlementSessionStore = settlementSessionStore;
         this.cartClient = cartClient;
         this.memberClient = memberClient;
@@ -306,6 +312,30 @@ public class OrderService {
                 ))
                 .toList()
         );
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryOrderSummary> getInventoryOrderSummaries(List<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> distinctIds = new LinkedHashSet<>(orderIds).stream().toList();
+        return tradeOrderRepository.findByIdIn(distinctIds).stream()
+            .map(order -> new InventoryOrderSummary(order.getId(), order.getOrderNo(), order.getOrderStatus()))
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public InventoryOrderHealth getInventoryOrderHealth(int pendingMinutes) {
+        int normalizedMinutes = Math.max(pendingMinutes, 1);
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(normalizedMinutes);
+        long pendingOutboxBacklog = orderOutboxEventRepository.countByPublishStatusAndCreatedAtBefore("PENDING", cutoff);
+        List<Long> staleWaitPayOrderIds = tradeOrderRepository.findStaleOrderIdsByStatus(
+            "WAIT_PAY",
+            cutoff,
+            PageRequest.of(0, 100)
+        );
+        return new InventoryOrderHealth(pendingOutboxBacklog, staleWaitPayOrderIds);
     }
 
     @Transactional

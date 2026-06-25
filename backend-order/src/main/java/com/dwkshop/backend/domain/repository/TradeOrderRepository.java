@@ -1,9 +1,14 @@
 package com.dwkshop.backend.domain.repository;
 
 import com.dwkshop.backend.domain.entity.TradeOrder;
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface TradeOrderRepository extends JpaRepository<TradeOrder, Long> {
 
@@ -14,4 +19,13 @@ public interface TradeOrderRepository extends JpaRepository<TradeOrder, Long> {
     Optional<TradeOrder> findByIdAndUserId(Long id, Long userId);
 
     Optional<TradeOrder> findByUserIdAndClientRequestId(Long userId, String clientRequestId);
+
+    List<TradeOrder> findByIdIn(Collection<Long> ids);
+
+    @Query("select o.id from TradeOrder o where o.orderStatus = :status and o.createdAt < :cutoff order by o.createdAt asc")
+    List<Long> findStaleOrderIdsByStatus(
+        @Param("status") String status,
+        @Param("cutoff") LocalDateTime cutoff,
+        Pageable pageable
+    );
 }

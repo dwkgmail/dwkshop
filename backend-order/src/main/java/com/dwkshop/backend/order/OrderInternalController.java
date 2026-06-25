@@ -1,5 +1,6 @@
 package com.dwkshop.backend.order;
 
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,6 +26,16 @@ public class OrderInternalController {
     @GetMapping("/{orderId}/refund-context")
     public RefundOrderContext getRefundContext(@PathVariable Long orderId) {
         return orderService.getRefundContext(orderId);
+    }
+
+    @GetMapping("/inventory-reconciliation/summaries")
+    public List<InventoryOrderSummary> getInventoryOrderSummaries(@RequestParam List<Long> orderIds) {
+        return orderService.getInventoryOrderSummaries(orderIds);
+    }
+
+    @GetMapping("/inventory-reconciliation/health")
+    public InventoryOrderHealth getInventoryOrderHealth(@RequestParam(defaultValue = "10") int pendingMinutes) {
+        return orderService.getInventoryOrderHealth(pendingMinutes);
     }
 
     @PostMapping("/{orderId}/aftersale/apply")

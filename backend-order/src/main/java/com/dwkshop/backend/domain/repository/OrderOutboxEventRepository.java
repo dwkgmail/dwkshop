@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface OrderOutboxEventRepository extends JpaRepository<OrderOutboxEvent, Long> {
     boolean existsByAggregateIdAndEventType(Long aggregateId, String eventType);
+    long countByPublishStatusAndCreatedAtBefore(String publishStatus, LocalDateTime createdAt);
     List<OrderOutboxEvent> findByPublishStatusAndNextRetryAtLessThanEqualOrderById(
         String status, LocalDateTime nextRetryAt, Pageable pageable);
 }

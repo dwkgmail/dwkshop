@@ -13,14 +13,16 @@ import com.dwkshop.backend.product.dto.InventoryRepairRecordResponse;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.List;
 import java.util.Properties;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -36,6 +38,7 @@ public class InventoryReconciliationService {
     private final JdbcTemplate jdbcTemplate;
     private final ProductSkuRepository productSkuRepository;
     private final InventoryReconciliationRepairRecordRepository repairRecordRepository;
+    private final OrderClient orderClient;
     private final ObjectProvider<RabbitAdmin> rabbitAdminProvider;
     private final List<String> deadLetterQueues;
     private final int pendingMinutes;
@@ -44,6 +47,7 @@ public class InventoryReconciliationService {
         JdbcTemplate jdbcTemplate,
         ProductSkuRepository productSkuRepository,
         InventoryReconciliationRepairRecordRepository repairRecordRepository,
+        OrderClient orderClient,
         ObjectProvider<RabbitAdmin> rabbitAdminProvider,
         @Value("${dwkshop.inventory-reconciliation.pending-minutes:10}") int pendingMinutes,
         @Value("#{'${dwkshop.inventory-reconciliation.dead-letter-queues:dwkshop.inventory.product.dead,dwkshop.refund.approved.product.dead}'.split(',')}") List<String> deadLetterQueues
@@ -51,6 +55,7 @@ public class InventoryReconciliationService {
         this.jdbcTemplate = jdbcTemplate;
         this.productSkuRepository = productSkuRepository;
         this.repairRecordRepository = repairRecordRepository;
+        this.orderClient = orderClient;
         this.rabbitAdminProvider = rabbitAdminProvider;
         this.pendingMinutes = pendingMinutes;
         this.deadLetterQueues = deadLetterQueues;
@@ -154,37 +159,31 @@ public class InventoryReconciliationService {
     }
 
     private List<InventoryReconciliationOrderResponse> relatedOrders(Long skuId) {
-        try {
-            return jdbcTemplate.query("""
-                SELECT s.order_id, o.order_no, s.quantity, s.state, s.updated_at
-                FROM inventory_order_item_state s
-                LEFT JOIN dwkshop_order.trade_order o ON o.id = s.order_id
-                WHERE s.sku_id = ?
-                ORDER BY s.updated_at DESC
-                LIMIT 10
-                """, (rs, rowNum) -> new InventoryReconciliationOrderResponse(
-                    rs.getLong("order_id"),
-                    rs.getString("order_no"),
-                    rs.getInt("quantity"),
-                    rs.getString("state"),
-                    rs.getTimestamp("updated_at").toLocalDateTime()
-                ), skuId);
-        } catch (DataAccessException ex) {
-            log.debug("order schema is unavailable for inventory reconciliation detail: {}", ex.getMessage());
-            return jdbcTemplate.query("""
-                SELECT order_id, quantity, state, updated_at
-                FROM inventory_order_item_state
-                WHERE sku_id = ?
-                ORDER BY updated_at DESC
-                LIMIT 10
-                """, (rs, rowNum) -> new InventoryReconciliationOrderResponse(
-                    rs.getLong("order_id"),
-                    null,
-                    rs.getInt("quantity"),
-                    rs.getString("state"),
-                    rs.getTimestamp("updated_at").toLocalDateTime()
-                ), skuId);
-        }
+        List<InventoryStateRow> states = jdbcTemplate.query("""
+            SELECT order_id, quantity, state, updated_at
+            FROM inventory_order_item_state
+            WHERE sku_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 10
+            """, (rs, rowNum) -> new InventoryStateRow(
+                rs.getLong("order_id"),
+                rs.getInt("quantity"),
+                rs.getString("state"),
+                rs.getTimestamp("updated_at").toLocalDateTime()
+            ), skuId);
+        Map<Long, InventoryOrderSummary> summaries = orderClient.getInventoryOrderSummaries(
+                states.stream().map(InventoryStateRow::orderId).toList()
+            ).stream()
+            .collect(Collectors.toMap(InventoryOrderSummary::id, Function.identity(), (left, right) -> left));
+        return states.stream()
+            .map(state -> new InventoryReconciliationOrderResponse(
+                state.orderId(),
+                summaries.get(state.orderId()) == null ? null : summaries.get(state.orderId()).orderNo(),
+                state.quantity(),
+                state.state(),
+                state.updatedAt()
+            ))
+            .toList();
     }
 
     private List<InventoryReconciliationEventResponse> recentEvents(Long skuId) {
@@ -209,21 +208,13 @@ public class InventoryReconciliationService {
     }
 
     private List<InventoryHealthCheckResponse> healthChecks() {
+        InventoryOrderHealth orderHealth = orderClient.getInventoryOrderHealth(pendingMinutes);
         return List.of(
             check("NEGATIVE_STOCK", countProduct("""
                 SELECT COUNT(*) FROM product_sku WHERE stock < 0 OR locked_stock < 0
                 """), "negative stock rows"),
-            check("OUTBOX_BACKLOG", countOptional("""
-                SELECT COUNT(*) FROM dwkshop_order.order_outbox_event
-                WHERE publish_status = 'PENDING' AND created_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)
-                """, pendingMinutes), "pending order outbox rows older than threshold"),
-            check("LOCK_PENDING_ORDERS", countOptional("""
-                SELECT COUNT(*) FROM dwkshop_order.trade_order o
-                LEFT JOIN dwkshop_product.inventory_order_item_state s ON s.order_id = o.id
-                WHERE o.order_status = 'WAIT_PAY'
-                  AND o.created_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)
-                  AND s.id IS NULL
-                """, pendingMinutes), "WAIT_PAY orders without inventory state after threshold"),
+            check("OUTBOX_BACKLOG", orderHealth.pendingOutboxBacklog(), "pending order outbox rows older than threshold"),
+            check("LOCK_PENDING_ORDERS", countOrdersWithoutInventoryState(orderHealth.waitPayOrderIds()), "WAIT_PAY orders without inventory state after threshold"),
             check("DEAD_LETTER_QUEUE", deadLetterCount(), "messages in product-related DLQs")
         );
     }
@@ -237,14 +228,20 @@ public class InventoryReconciliationService {
         return count == null ? 0 : count;
     }
 
-    private long countOptional(String sql, Object... args) {
-        try {
-            Long count = jdbcTemplate.queryForObject(sql, Long.class, args);
-            return count == null ? 0 : count;
-        } catch (DataAccessException ex) {
-            log.debug("inventory health check skipped: {}", ex.getMessage());
+    private long countOrdersWithoutInventoryState(List<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) {
             return 0;
         }
+        return orderIds.stream()
+            .filter(orderId -> {
+                Long count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM inventory_order_item_state WHERE order_id = ?",
+                    Long.class,
+                    orderId
+                );
+                return count == null || count == 0;
+            })
+            .count();
     }
 
     private long deadLetterCount() {
@@ -321,6 +318,14 @@ public class InventoryReconciliationService {
         Integer projectedLockedStock,
         Integer actualLockedStock,
         Integer difference
+    ) {
+    }
+
+    private record InventoryStateRow(
+        Long orderId,
+        Integer quantity,
+        String state,
+        LocalDateTime updatedAt
     ) {
     }
 }

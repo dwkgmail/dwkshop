@@ -253,9 +253,12 @@ class OrderBusinessFlowIntegrationTest {
             .andExpect(jsonPath("$.payAmount").value(1000));
 
         TradeOrder order = tradeOrderRepository.findAll().get(0);
-        order.setOrderStatus("WAIT_SHIP");
-        order.setPayStatus("PAID");
-        tradeOrderRepository.save(order);
+        verify(memberClient).freezePoints(1L, order.getId(), "ORDER_POINT:" + order.getId(), 50000);
+
+        mockMvc.perform(post("/api/orders/{orderId}/pay", order.getId()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.payStatus").value("PAID"));
+        verify(memberClient).deductFrozenPoints(1L, order.getId(), "ORDER_POINT:" + order.getId(), 50000);
 
         mockMvc.perform(post("/internal/orders/{orderId}/aftersale/apply", order.getId())
                 .param("userId", "1")
@@ -272,6 +275,7 @@ class OrderBusinessFlowIntegrationTest {
         assertThat(refunded.getOrderStatus()).isEqualTo("WAIT_SHIP");
         assertThat(refunded.getPayStatus()).isEqualTo("REFUNDED");
         assertThat(amount.getPointDiscountAmount()).isEqualTo(500);
+        verify(memberClient).refundPoints(1L, order.getId(), "ORDER_POINT:" + order.getId(), 50000);
     }
 
     @Test

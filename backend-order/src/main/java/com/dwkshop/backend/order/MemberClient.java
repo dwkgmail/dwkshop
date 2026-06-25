@@ -43,4 +43,31 @@ public class MemberClient {
             .bodyToMono(MemberPointAccount.class)
             .block();
     }
+
+    public void freezePoints(Long userId, Long orderId, String bizNo, Integer points) {
+        changePoints(userId, "/internal/members/{userId}/points/freeze", orderId, bizNo, points);
+    }
+
+    public void deductFrozenPoints(Long userId, Long orderId, String bizNo, Integer points) {
+        changePoints(userId, "/internal/members/{userId}/points/deduct", orderId, bizNo, points);
+    }
+
+    public void releaseFrozenPoints(Long userId, Long orderId, String bizNo, Integer points) {
+        changePoints(userId, "/internal/members/{userId}/points/release", orderId, bizNo, points);
+    }
+
+    public void refundPoints(Long userId, Long orderId, String bizNo, Integer points) {
+        changePoints(userId, "/internal/members/{userId}/points/refund", orderId, bizNo, points);
+    }
+
+    private void changePoints(Long userId, String path, Long orderId, String bizNo, Integer points) {
+        webClient.post()
+            .uri(path, userId)
+            .bodyValue(new MemberPointCommandRequest(orderId, bizNo, points))
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.createException()
+                .map(ex -> new ResponseStatusException(response.statusCode(), "Member point account is unavailable")))
+            .toBodilessEntity()
+            .block();
+    }
 }

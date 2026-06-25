@@ -2,10 +2,14 @@ package com.dwkshop.backend.member;
 
 import com.dwkshop.backend.domain.entity.UserAddress;
 import com.dwkshop.backend.domain.entity.UserPointAccount;
+import com.dwkshop.backend.domain.entity.UserPointFlow;
 import com.dwkshop.backend.domain.repository.UserAddressRepository;
 import com.dwkshop.backend.domain.repository.UserPointAccountRepository;
+import com.dwkshop.backend.domain.repository.UserPointFlowRepository;
 import com.dwkshop.backend.member.dto.MemberAddressResponse;
 import com.dwkshop.backend.member.dto.MemberPointAccountResponse;
+import com.dwkshop.backend.member.dto.MemberPointCommandRequest;
+import java.time.LocalDateTime;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,13 +20,16 @@ public class MemberService {
 
     private final UserAddressRepository userAddressRepository;
     private final UserPointAccountRepository userPointAccountRepository;
+    private final UserPointFlowRepository userPointFlowRepository;
 
     public MemberService(
         UserAddressRepository userAddressRepository,
-        UserPointAccountRepository userPointAccountRepository
+        UserPointAccountRepository userPointAccountRepository,
+        UserPointFlowRepository userPointFlowRepository
     ) {
         this.userAddressRepository = userAddressRepository;
         this.userPointAccountRepository = userPointAccountRepository;
+        this.userPointFlowRepository = userPointFlowRepository;
     }
 
     @Transactional(readOnly = true)
@@ -40,6 +47,109 @@ public class MemberService {
     public MemberPointAccountResponse getPointAccount(Long userId) {
         UserPointAccount account = userPointAccountRepository.findByUserId(userId).orElse(null);
         return new MemberPointAccountResponse(userId, account == null ? 0 : account.getAvailablePoints());
+    }
+
+    @Transactional
+    public MemberPointAccountResponse freezePoints(Long userId, MemberPointCommandRequest request) {
+        return changePoints(userId, request, "POINT_FREEZE");
+    }
+
+    @Transactional
+    public MemberPointAccountResponse deductFrozenPoints(Long userId, MemberPointCommandRequest request) {
+        return changePoints(userId, request, "POINT_DEDUCT");
+    }
+
+    @Transactional
+    public MemberPointAccountResponse releaseFrozenPoints(Long userId, MemberPointCommandRequest request) {
+        return changePoints(userId, request, "POINT_RELEASE");
+    }
+
+    @Transactional
+    public MemberPointAccountResponse refundPoints(Long userId, MemberPointCommandRequest request) {
+        return changePoints(userId, request, "POINT_REFUND");
+    }
+
+    private MemberPointAccountResponse changePoints(Long userId, MemberPointCommandRequest request, String changeType) {
+        String flowNo = request.bizNo() + ":" + changeType;
+        if (userPointFlowRepository.existsByFlowNo(flowNo)) {
+            UserPointAccount account = userPointAccountRepository.findByUserId(userId).orElse(null);
+            return new MemberPointAccountResponse(userId, account == null ? 0 : account.getAvailablePoints());
+        }
+        UserPointAccount account = userPointAccountRepository.findLockedByUserId(userId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Point account does not exist"));
+        int points = request.points();
+        int before = account.getAvailablePoints();
+        int after;
+        if ("POINT_FREEZE".equals(changeType)) {
+            if (before < points) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient points");
+            }
+            after = before - points;
+            account.setAvailablePoints(after);
+            account.setLockedPoints(account.getLockedPoints() + points);
+        } else if ("POINT_DEDUCT".equals(changeType)) {
+            if (account.getLockedPoints() < points) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient frozen points");
+            }
+            after = before;
+            account.setLockedPoints(account.getLockedPoints() - points);
+            account.setTotalUsedPoints(account.getTotalUsedPoints() + points);
+        } else if ("POINT_RELEASE".equals(changeType)) {
+            if (account.getLockedPoints() < points) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Insufficient frozen points");
+            }
+            after = before + points;
+            account.setAvailablePoints(after);
+            account.setLockedPoints(account.getLockedPoints() - points);
+        } else if ("POINT_REFUND".equals(changeType)) {
+            after = before + points;
+            account.setAvailablePoints(after);
+            account.setTotalUsedPoints(Math.max(account.getTotalUsedPoints() - points, 0));
+        } else {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported point flow type");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        account.setUpdatedAt(now);
+        userPointAccountRepository.save(account);
+        userPointFlowRepository.save(toFlow(userId, request, flowNo, changeType, points, before, after, now));
+        return new MemberPointAccountResponse(userId, account.getAvailablePoints());
+    }
+
+    private UserPointFlow toFlow(
+        Long userId,
+        MemberPointCommandRequest request,
+        String flowNo,
+        String changeType,
+        int points,
+        int before,
+        int after,
+        LocalDateTime now
+    ) {
+        UserPointFlow flow = new UserPointFlow();
+        flow.setUserId(userId);
+        flow.setFlowNo(flowNo);
+        flow.setChangeType(changeType);
+        flow.setChangePoints(signedChange(changeType, points));
+        flow.setBalanceAfter(after);
+        flow.setBizType("ORDER");
+        flow.setBizId(request.orderId());
+        flow.setOrderId(request.orderId());
+        flow.setBizNo(request.bizNo());
+        flow.setChangeAmount(signedChange(changeType, points));
+        flow.setBeforeBalance(before);
+        flow.setAfterBalance(after);
+        flow.setStatus("SUCCESS");
+        flow.setRemark(changeType);
+        flow.setCreatedAt(now);
+        return flow;
+    }
+
+    private int signedChange(String changeType, int points) {
+        return switch (changeType) {
+            case "POINT_FREEZE", "POINT_DEDUCT" -> -points;
+            case "POINT_RELEASE", "POINT_REFUND" -> points;
+            default -> 0;
+        };
     }
 
     private MemberAddressResponse toAddress(UserAddress address) {

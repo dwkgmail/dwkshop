@@ -181,9 +181,10 @@ public class OrderService {
             tradeOrderRepository.save(order);
             inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
                 InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
-            return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), false);
+            return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), pointDiscountPoints(order), false);
         });
         releaseCouponIfPresent(userId, transition.couponUserId(), orderId);
+        releasePointsIfPresent(userId, orderId, transition.pointAmount());
         return transition.response();
     }
 
@@ -192,7 +193,7 @@ public class OrderService {
             TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
             if (OrderStateMachine.PAY_PAID.equals(order.getPayStatus())) {
-                return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), false);
+                return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), 0, false);
             }
             LocalDateTime now = LocalDateTime.now();
             if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
@@ -200,16 +201,18 @@ public class OrderService {
                 tradeOrderRepository.save(order);
                 inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
                     InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
-                return new OrderTransition(null, order.getCouponUserId(), true);
+                return new OrderTransition(null, order.getCouponUserId(), pointDiscountPoints(order), true);
             }
             OrderStateMachine.pay(order, now);
             tradeOrderRepository.save(order);
-            return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), false);
+            return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), pointDiscountPoints(order), false);
         });
         if (transition.expired()) {
             releaseCouponIfPresent(userId, transition.couponUserId(), orderId);
+            releasePointsIfPresent(userId, orderId, transition.pointAmount());
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单支付已超时");
         }
+        deductPointsIfPresent(userId, orderId, transition.pointAmount());
         useCouponIfPresent(userId, transition.couponUserId(), orderId);
         return transition.response();
     }
@@ -320,6 +323,7 @@ public class OrderService {
         OrderStateMachine.completeAftersale(order, LocalDateTime.now());
         TradeOrder savedOrder = tradeOrderRepository.save(order);
         refundCouponAfterCommit(savedOrder.getUserId(), savedOrder.getCouponUserId(), savedOrder.getId(), true);
+        refundPointsAfterCommit(savedOrder.getUserId(), savedOrder.getId(), pointDiscountPoints(savedOrder), true);
         return toAftersaleSnapshot(savedOrder, items);
     }
 
@@ -350,6 +354,7 @@ public class OrderService {
         OrderStateMachine.completeAftersale(order, LocalDateTime.now(), fullRefund);
         TradeOrder savedOrder = tradeOrderRepository.save(order);
         refundCouponAfterCommit(savedOrder.getUserId(), savedOrder.getCouponUserId(), savedOrder.getId(), fullRefund);
+        refundPointsAfterCommit(savedOrder.getUserId(), savedOrder.getId(), pointDiscountPoints(savedOrder), fullRefund);
         return toAftersaleSnapshot(savedOrder, items);
     }
 
@@ -530,6 +535,7 @@ public class OrderService {
         tradeOrderAmountRepository.save(amount);
 
         inventoryOutbox.append(savedOrder, savedItems, InventoryIntegrationEvent.ORDER_CREATED, 1, now);
+        freezePointsIfPresent(userId, savedOrder.getId(), pointDiscountPoints(savedOrder));
 
         return toOrderResponse(savedOrder);
     }
@@ -570,6 +576,49 @@ public class OrderService {
         } catch (RuntimeException ignored) {
             // Best-effort compensation after local order creation fails.
         }
+    }
+
+    private void freezePointsIfPresent(Long userId, Long orderId, int points) {
+        if (points > 0) {
+            memberClient.freezePoints(userId, orderId, pointBizNo(orderId), points);
+        }
+    }
+
+    private void deductPointsIfPresent(Long userId, Long orderId, int points) {
+        if (points > 0) {
+            memberClient.deductFrozenPoints(userId, orderId, pointBizNo(orderId), points);
+        }
+    }
+
+    private void releasePointsIfPresent(Long userId, Long orderId, int points) {
+        if (points > 0) {
+            memberClient.releaseFrozenPoints(userId, orderId, pointBizNo(orderId), points);
+        }
+    }
+
+    private void refundPointsAfterCommit(Long userId, Long orderId, int points, boolean fullRefund) {
+        if (!fullRefund || points <= 0) {
+            return;
+        }
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            memberClient.refundPoints(userId, orderId, pointBizNo(orderId), points);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                memberClient.refundPoints(userId, orderId, pointBizNo(orderId), points);
+            }
+        });
+    }
+
+    private int pointDiscountPoints(TradeOrder order) {
+        int pointDiscountAmount = order.getPointAmount() == null ? 0 : order.getPointAmount();
+        return Math.max(pointDiscountAmount, 0) * POINT_EXCHANGE_RATE;
+    }
+
+    private String pointBizNo(Long orderId) {
+        return "ORDER_POINT:" + orderId;
     }
 
     private void refundCouponAfterCommit(Long userId, Long userCouponId, Long orderId, boolean fullRefund) {
@@ -825,7 +874,7 @@ public class OrderService {
     private record PointSelection(boolean visible, int availablePoints, int deductionAmount, boolean selected) {
     }
 
-    private record OrderTransition(OrderResponse response, Long couponUserId, boolean expired) {
+    private record OrderTransition(OrderResponse response, Long couponUserId, int pointAmount, boolean expired) {
     }
 
 }

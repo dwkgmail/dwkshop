@@ -366,3 +366,17 @@ WHERE event_id = '替换为事件ID'
 | 有消费记录但状态/SKU 对账异常 | 重放通常无效，进入受控库存校准 |
 | 取消先于创建且最终为 `RELEASED` version 2 | 预期行为，无需补偿 |
 | 重复消息 | 由幂等消费吸收；观察即可 |
+## 10. 后台库存对账产品化
+
+生产排查不再只依赖人工 SQL。商品服务提供后台接口 `GET /admin/inventory-reconciliation`，后台页面“库存对账”展示：
+
+- SKU 当前可售库存 `product_sku.stock`。
+- 按 `inventory_order_item_state.state = 'LOCKED'` 汇总的 projected locked stock。
+- `product_sku.locked_stock` 实际值。
+- 差异数量。
+- 关联订单、最近消费事件、最近修复记录。
+- 是否允许自动修复。
+
+`POST /admin/inventory-reconciliation/skus/{skuId}/repair` 只修复 `locked_stock` 到 projected 值，并写入 `inventory_reconciliation_repair_record`。该修复不修改 `stock`、订单状态、outbox payload 或消费记录；如果需要同时校准可售库存或业务状态，仍必须走工单和专项补偿流程。
+
+商品服务默认每小时执行一次库存巡检（`dwkshop.inventory-reconciliation.cron` 可配置），覆盖锁定库存对账、负库存检查、商品相关 DLQ 检查、订单 outbox 积压检查，以及长时间未产生库存状态的待支付订单检查。巡检发现异常会写入应用日志，后台页面可实时刷新查看明细。

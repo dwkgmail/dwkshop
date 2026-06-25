@@ -6,8 +6,10 @@ import {
   getAdminAccounts,
   getAdminMembers,
   getCoupons,
+  getInventoryReconciliation,
   getOperationLogs,
   getRoles,
+  repairInventoryLockedStock,
   updateAdminAccountStatus,
   updateCouponStatus,
   updateMemberStatus,
@@ -16,6 +18,7 @@ import {
   type AdminMember,
   type AdminRole,
   type CouponPayload,
+  type InventoryReconciliationReport,
   type OperationLog
 } from '../api/admin';
 import { approveAftersale, getAftersales, rejectAftersale, type Aftersale } from '../api/aftersales';
@@ -49,6 +52,7 @@ type Page =
   | 'coupon-create'
   | 'users'
   | 'permissions'
+  | 'inventory-reconciliation'
   | 'logs'
   | 'placeholder';
 
@@ -72,6 +76,7 @@ const coupons = ref<AdminCoupon[]>([]);
 const roles = ref<AdminRole[]>([]);
 const adminAccounts = ref<AdminAccount[]>([]);
 const operationLogs = ref<OperationLog[]>([]);
+const inventoryReport = ref<InventoryReconciliationReport | null>(null);
 const currentOrder = ref<OrderDetail | null>(null);
 const orderDetailsById = ref<Record<number, OrderDetail>>({});
 const editingId = ref<number | null>(null);
@@ -82,6 +87,7 @@ const aftersaleFilters = reactive({ keyword: '', status: '' });
 const memberFilters = reactive({ keyword: '', status: '' });
 const couponFilters = reactive({ keyword: '', status: '' });
 const logFilters = reactive({ module: '', keyword: '' });
+const inventoryFilters = reactive({ onlyDiff: true });
 const shippingForm = reactive({ logisticsCompany: '', logisticsNo: '', deliveryRemark: '' });
 const deliveryStatusForm = reactive({ deliveryStatus: 'IN_TRANSIT', deliveryRemark: '' });
 
@@ -120,6 +126,7 @@ const couponForm = reactive<CouponPayload>({
 });
 
 const menu = [
+  { key: 'inventory-reconciliation', label: '库存对账' },
   { key: 'dashboard', label: '首页' },
   { key: 'products', label: '商品管理' },
   { key: 'orders', label: '订单管理' },
@@ -133,6 +140,7 @@ const menu = [
 
 const pageTitle = computed(() => {
   const titles: Record<Page, string> = {
+    'inventory-reconciliation': '库存对账',
     dashboard: '后台首页',
     products: '商品管理',
     'product-create': '新增商品',
@@ -299,6 +307,7 @@ function resetSession(message?: string) {
   roles.value = [];
   adminAccounts.value = [];
   operationLogs.value = [];
+  inventoryReport.value = null;
   currentOrder.value = null;
   page.value = 'dashboard';
   if (message) showToast(message);
@@ -339,6 +348,9 @@ function nav(key: string) {
   } else if (key === 'permissions') {
     page.value = 'permissions';
     loadPermissions();
+  } else if (key === 'inventory-reconciliation') {
+    page.value = 'inventory-reconciliation';
+    loadInventoryReconciliation();
   } else if (key === 'logs') {
     page.value = 'logs';
     loadLogs();
@@ -382,6 +394,10 @@ async function loadPermissions() {
   });
 }
 
+async function loadInventoryReconciliation() {
+  await runTask(loadInventoryReconciliationQuietly);
+}
+
 async function loadLogs() {
   await runTask(loadLogsQuietly);
 }
@@ -422,6 +438,10 @@ async function loadRolesQuietly() {
 
 async function loadAdminAccountsQuietly() {
   adminAccounts.value = await getAdminAccounts();
+}
+
+async function loadInventoryReconciliationQuietly() {
+  inventoryReport.value = await getInventoryReconciliation(inventoryFilters.onlyDiff);
 }
 
 async function loadLogsQuietly() {
@@ -684,6 +704,15 @@ async function changeAdminRole(account: AdminAccount, event: Event) {
   });
 }
 
+async function repairInventoryItem(skuId: number) {
+  const reason = window.prompt('请输入修复原因', '库存对账修复 locked_stock')?.trim() || '库存对账修复 locked_stock';
+  await runTask(async () => {
+    await repairInventoryLockedStock(skuId, reason);
+    await loadInventoryReconciliationQuietly();
+    showToast('库存修复记录已保存');
+  });
+}
+
 function statusText(status: string) {
   const map: Record<string, string> = {
     ACTIVE: '启用',
@@ -717,7 +746,8 @@ function isActiveMenu(key: string) {
     (key === 'products' && page.value.startsWith('product')) ||
     (key === 'orders' && page.value.startsWith('order')) ||
     (key === 'aftersale' && page.value === 'aftersales') ||
-    (key === 'coupons' && page.value.startsWith('coupon'))
+    (key === 'coupons' && page.value.startsWith('coupon')) ||
+    (key === 'inventory-reconciliation' && page.value === 'inventory-reconciliation')
   );
 }
 
@@ -1061,6 +1091,61 @@ onUnmounted(() => {
               </tbody>
             </table>
           </section>
+        </section>
+      </section>
+
+      <section v-else-if="page === 'inventory-reconciliation'" class="page">
+        <section class="panel filters">
+          <label><input v-model="inventoryFilters.onlyDiff" type="checkbox" /> 只看差异</label>
+          <button class="primary" type="button" @click="loadInventoryReconciliation">刷新对账</button>
+        </section>
+        <section class="dashboard-grid">
+          <section v-for="check in inventoryReport?.checks ?? []" :key="check.checkType" class="panel info-list">
+            <h2>{{ check.checkType }}</h2>
+            <div><span>状态</span><strong>{{ check.status }}</strong></div>
+            <div><span>数量</span><strong>{{ check.count }}</strong></div>
+            <div><span>说明</span><strong>{{ check.message }}</strong></div>
+          </section>
+        </section>
+        <section class="panel table-panel">
+          <div class="section-heading">
+            <h2>SKU 锁定库存对账</h2>
+            <span>检查时间 {{ formatTime(inventoryReport?.checkedAt) }}</span>
+          </div>
+          <table>
+            <thead><tr><th>SKU</th><th>当前库存</th><th>Projected locked</th><th>实际 locked</th><th>差异</th><th>关联订单</th><th>最近事件</th><th>修复记录</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="item in inventoryReport?.items ?? []" :key="item.skuId">
+                <td><strong>{{ item.skuName }}</strong><br /><span>{{ item.productName }} / {{ item.skuCode }}</span></td>
+                <td>{{ item.currentStock }}</td>
+                <td>{{ item.projectedLockedStock }}</td>
+                <td>{{ item.actualLockedStock }}</td>
+                <td><em class="status">{{ item.difference }}</em></td>
+                <td>
+                  <div v-for="order in item.relatedOrders" :key="`${item.skuId}-${order.orderId}`">
+                    #{{ order.orderNo || order.orderId }} {{ order.state }} x{{ order.quantity }}
+                  </div>
+                  <span v-if="item.relatedOrders.length === 0">-</span>
+                </td>
+                <td>
+                  <div v-for="event in item.recentEvents" :key="`${item.skuId}-${event.eventId}`">
+                    {{ event.eventType }} {{ formatTime(event.consumedAt) }}
+                  </div>
+                  <span v-if="item.recentEvents.length === 0">-</span>
+                </td>
+                <td>
+                  <div v-for="record in item.repairRecords.slice(0, 2)" :key="record.id">
+                    {{ record.repairStatus }} {{ formatTime(record.createdAt) }}
+                  </div>
+                  <span v-if="item.repairRecords.length === 0">-</span>
+                </td>
+                <td class="actions">
+                  <button type="button" :disabled="!item.autoRepairAllowed" @click="repairInventoryItem(item.skuId)">自动修复</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="(inventoryReport?.items.length ?? 0) === 0" class="empty">暂无库存差异</div>
         </section>
       </section>
 

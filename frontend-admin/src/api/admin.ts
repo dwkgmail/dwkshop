@@ -77,6 +77,63 @@ export interface OperationLog {
   createdAt: string;
 }
 
+export interface InventoryReconciliationOrder {
+  orderId: number;
+  orderNo?: string;
+  quantity: number;
+  state: string;
+  updatedAt: string;
+}
+
+export interface InventoryReconciliationEvent {
+  eventId: string;
+  orderId: number;
+  eventType: string;
+  consumedAt: string;
+}
+
+export interface InventoryRepairRecord {
+  id: number;
+  skuId: number;
+  beforeLockedStock: number;
+  projectedLockedStock: number;
+  difference: number;
+  repairType: string;
+  repairStatus: string;
+  operator: string;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface InventoryReconciliationItem {
+  skuId: number;
+  skuCode: string;
+  skuName: string;
+  productId: number;
+  productName: string;
+  currentStock: number;
+  projectedLockedStock: number;
+  actualLockedStock: number;
+  difference: number;
+  autoRepairAllowed: boolean;
+  relatedOrders: InventoryReconciliationOrder[];
+  recentEvents: InventoryReconciliationEvent[];
+  repairRecords: InventoryRepairRecord[];
+}
+
+export interface InventoryHealthCheck {
+  checkType: string;
+  status: string;
+  count: number;
+  message: string;
+}
+
+export interface InventoryReconciliationReport {
+  checkedAt: string;
+  items: InventoryReconciliationItem[];
+  checks: InventoryHealthCheck[];
+}
+
 export function getAdminMembers() {
   return request<AdminMember[]>('/admin/users');
 }
@@ -130,4 +187,15 @@ export function updateAdminAccountStatus(id: number, status: string) {
 
 export function getOperationLogs() {
   return request<OperationLog[]>('/admin/operation-logs');
+}
+
+export function getInventoryReconciliation(onlyDiff = false) {
+  return request<InventoryReconciliationReport>(`/admin/inventory-reconciliation?onlyDiff=${onlyDiff}`);
+}
+
+export function repairInventoryLockedStock(skuId: number, reason: string) {
+  return request<InventoryRepairRecord>(`/admin/inventory-reconciliation/skus/${skuId}/repair`, {
+    method: 'POST',
+    body: JSON.stringify({ operator: 'admin', reason })
+  });
 }

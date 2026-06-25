@@ -24,11 +24,35 @@ aftersale-service
 
 统一库存事件载荷包含：`eventId`、`eventType`、`eventVersion`、`orderId`、`orderNo`、`occurredAt` 和 `items(skuId, quantity)`。
 
-| eventType | version | 作用 | 成功后的状态 |
-| --- | ---: | --- | --- |
-| `ORDER_CREATED` | 1 | `stock -= quantity`，`locked_stock += quantity` | `LOCKED` |
-| `ORDER_CANCELLED` | 2 | 释放已锁定库存 | `RELEASED` |
-| `REFUND_APPROVED` | 3 | 待发货退款审批后释放已锁定库存 | `RELEASED` |
+### 1.1 库存字段口径
+
+| 字段 | 含义 | 当前落库字段 |
+| --- | --- | --- |
+| `availableStock` | 可售库存；下单锁库时减少，未支付取消或发货前退款释放时增加。 | `product_sku.stock` |
+| `lockedStock` | 下单未支付或已支付待发货的占用库存。当前模型把支付前锁定和待发货占用都放在这里。 | `product_sku.locked_stock` |
+| `soldStock` | 支付成功确认销售或出库后的已售数量。 | 暂未单独落库 |
+| `returnedStock` | 发货后退货入库或待质检数量。 | 暂未单独落库 |
+| `safetyStock` | 安全库存，不应对外可售。 | 暂未单独落库 |
+| `oversellLimit` | 可选超卖额度。 | 暂未支持 |
+
+当前生产语义是“支付前锁库存 + 已支付待发货仍占用锁定库存”。如果后续补充 `soldStock` 或待履约占用字段，支付成功时应从 `lockedStock` 转出，而不是继续把所有已支付订单都解释为可释放的锁定库存。
+
+### 1.2 事件表
+
+| eventType | version | 库存影响 | 适用边界 | 成功后的状态 |
+| --- | ---: | --- | --- | --- |
+| `ORDER_CREATED` | 1 | `availableStock -= quantity`，`lockedStock += quantity`；当前实现为 `stock -= quantity`、`locked_stock += quantity` | 下单锁库存 | `LOCKED` |
+| `ORDER_CANCELLED` | 2 | `availableStock += quantity`，`lockedStock -= quantity` | 未支付订单取消、支付超时关闭、锁库失败后的补偿关闭 | `RELEASED` |
+| `REFUND_APPROVED` | 3 | `availableStock += quantity`，`lockedStock -= quantity` | 仅限发货前退款或仍处于待发货占用的售后释放 | `RELEASED` |
+
+建议后续补充的事件：
+
+| eventType | 库存影响 | 适用边界 |
+| --- | --- | --- |
+| `PAYMENT_SUCCEEDED` | `lockedStock -= quantity`，`soldStock += quantity`，或转入独立的待履约占用字段 | 支付成功，库存状态从“支付前锁定”升级为“已售/待履约占用” |
+| `RETURN_RECEIVED` | 可二次销售时 `availableStock += quantity`；不可直接销售时 `returnedStock += quantity` | 发货后退货实际入库或质检完成 |
+
+仅退款不退货不应增加 `availableStock`；发货后售后也不应仅凭 `REFUND_APPROVED` 立即恢复可售库存。
 
 `ORDER_CANCELLED` 先到时会写入 `RELEASED` tombstone，但不修改 SKU 库存；迟到的 version 1 创建事件会被视为旧事件，不再锁库存。成功处理的旧事件仍会写入消费记录。
 

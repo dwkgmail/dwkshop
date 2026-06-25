@@ -41,7 +41,9 @@ Refunds and returns are modeled as payment/aftersale state, not as a main order 
 | update delivery | shipped order with delivery time | `deliveryStatus=SHIPPED`, `IN_TRANSIT`, or `DELIVERED`; `DELIVERED` also sets `orderStatus=FINISHED` and `finishTime` |
 | request aftersale | paid order, aftersale status is `NONE` or `REJECTED` | `aftersaleStatus=APPLYING` |
 | reject aftersale | `aftersaleStatus=APPLYING` | `aftersaleStatus=REJECTED` |
-| approve refund | `aftersaleStatus=APPLYING` | `orderStatus` is unchanged; `payStatus=REFUNDED`, `aftersaleStatus=REFUNDED`, `inventoryStatus=RELEASE_PENDING` when refundable locked stock exists; refund event drives inventory release |
+| approve refund before shipment | `aftersaleStatus=APPLYING`, `payStatus=PAID`, and `deliveryStatus=UNSHIPPED` | `orderStatus` is unchanged; `payStatus=REFUNDED`, `aftersaleStatus=REFUNDED`, `inventoryStatus=RELEASE_PENDING` when refundable locked stock exists; `REFUND_APPROVED` releases `lockedStock` back to `availableStock` |
+| approve refund after shipment, refund only | `aftersaleStatus=APPLYING`, `payStatus=PAID`, and order has shipped | `orderStatus` is unchanged; `payStatus=REFUNDED`, `aftersaleStatus=REFUNDED`; do not increase `availableStock` because goods are not returned |
+| approve return/refund after shipment | `aftersaleStatus=APPLYING`, `payStatus=PAID`, order has shipped, and returned goods have been received or inspected | `orderStatus` is unchanged; `payStatus=REFUNDED`, `aftersaleStatus=REFUNDED`; inventory is restored only after return receipt/inspection, either to `availableStock` if saleable or to `returnedStock` if not directly saleable |
 
 ## Invariants
 
@@ -53,6 +55,8 @@ Refunds and returns are modeled as payment/aftersale state, not as a main order 
 - A late payment callback must not move a `CANCELED` or `LOCK_FAILED` order to `WAIT_SHIP`; it should enter payment reversal or refund handling.
 - Delivery cannot be updated until the order has been shipped.
 - Refund approval is idempotent when `aftersaleStatus=REFUNDED`.
+- `REFUND_APPROVED` only means inventory release for pre-shipment refunds in the current implementation; post-shipment refund-only cases must not restore saleable stock.
+- Returned goods restore stock only after receipt/inspection, not at refund approval time.
 - Inventory events are published from outbox tables and are safe to retry.
 
 ## Review checklist for future changes

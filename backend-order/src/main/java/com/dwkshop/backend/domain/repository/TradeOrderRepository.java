@@ -28,4 +28,19 @@ public interface TradeOrderRepository extends JpaRepository<TradeOrder, Long> {
         @Param("cutoff") LocalDateTime cutoff,
         Pageable pageable
     );
+
+    @Query("""
+        select o.id from TradeOrder o
+        where o.orderStatus = :orderStatus
+          and o.payStatus = :payStatus
+          and o.payExpireTime is not null
+          and o.payExpireTime <= :now
+        order by o.payExpireTime asc, o.id asc
+        """)
+    List<Long> findExpiredUnpaidOrderIds(
+        @Param("orderStatus") String orderStatus,
+        @Param("payStatus") String payStatus,
+        @Param("now") LocalDateTime now,
+        Pageable pageable
+    );
 }

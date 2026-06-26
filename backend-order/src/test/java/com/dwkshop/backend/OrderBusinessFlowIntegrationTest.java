@@ -19,6 +19,7 @@ import com.dwkshop.backend.order.MarketingCouponSelection;
 import com.dwkshop.backend.order.MemberAddress;
 import com.dwkshop.backend.order.MemberClient;
 import com.dwkshop.backend.order.MemberPointAccount;
+import com.dwkshop.backend.order.OrderService;
 import com.dwkshop.backend.order.ProductCatalogClient;
 import com.dwkshop.backend.order.ProductSkuSnapshot;
 import java.time.LocalDateTime;
@@ -63,6 +64,7 @@ class OrderBusinessFlowIntegrationTest {
     @Autowired PaymentOrderRepository paymentOrderRepository;
     @Autowired PaymentTransactionRepository paymentTransactionRepository;
     @Autowired AuthTokenService authTokenService;
+    @Autowired OrderService orderService;
 
     @MockBean CartClient cartClient;
     @MockBean MemberClient memberClient;
@@ -283,6 +285,31 @@ class OrderBusinessFlowIntegrationTest {
         assertThat(refunded.getPayStatus()).isEqualTo("REFUNDED");
         assertThat(amount.getPointDiscountAmount()).isEqualTo(500);
         verify(memberClient).refundPoints(1L, order.getId(), "ORDER_POINT:" + order.getId(), 50000);
+    }
+
+    @Test
+    void scheduledPaymentTimeoutClosesExpiredWaitPayOrderAndReleasesAssets() {
+        Long orderId = seedUnpaidOrder("SO202606260010", 1600);
+        LocalDateTime now = LocalDateTime.now();
+        TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
+        order.setCouponUserId(9001L);
+        order.setCouponAmount(300);
+        order.setPointAmount(500);
+        order.setPayExpireTime(now.minusSeconds(1));
+        tradeOrderRepository.save(order);
+
+        int closed = orderService.closeExpiredUnpaidOrders(now, 10);
+
+        TradeOrder closedOrder = tradeOrderRepository.findById(orderId).orElseThrow();
+        assertThat(closed).isEqualTo(1);
+        assertThat(closedOrder.getOrderStatus()).isEqualTo("CANCELED");
+        assertThat(closedOrder.getPayStatus()).isEqualTo("CLOSED");
+        assertThat(closedOrder.getCancelTime()).isBetween(now.minusSeconds(1), now.plusSeconds(1));
+        assertThat(orderOutboxEventRepository.count()).isEqualTo(1);
+        assertThat(orderOutboxEventRepository.findAll().get(0).getEventType())
+            .isEqualTo(InventoryIntegrationEvent.ORDER_CANCELLED);
+        verify(marketingClient).releaseCoupon(1L, 9001L, orderId);
+        verify(memberClient).releaseFrozenPoints(1L, orderId, "ORDER_POINT:" + orderId, 50000);
     }
 
     @Test

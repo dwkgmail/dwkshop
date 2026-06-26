@@ -72,6 +72,7 @@ public class OrderService {
     private final OrderInventoryOutbox inventoryOutbox;
     private final TransactionTemplate transactionTemplate;
     private final Duration settlementTtl;
+    private final int paymentTimeoutCloseBatchSize;
 
     public OrderService(
         TradeOrderRepository tradeOrderRepository,
@@ -87,7 +88,8 @@ public class OrderService {
         ProductCatalogClient productCatalogClient,
         OrderInventoryOutbox inventoryOutbox,
         TransactionTemplate transactionTemplate,
-        @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
+        @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes,
+        @Value("${dwkshop.order.payment-timeout-close-batch-size:100}") int paymentTimeoutCloseBatchSize
     ) {
         this.tradeOrderRepository = tradeOrderRepository;
         this.tradeOrderItemRepository = tradeOrderItemRepository;
@@ -103,6 +105,7 @@ public class OrderService {
         this.inventoryOutbox = inventoryOutbox;
         this.transactionTemplate = transactionTemplate;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
+        this.paymentTimeoutCloseBatchSize = Math.max(paymentTimeoutCloseBatchSize, 1);
     }
 
     @Transactional(readOnly = true)
@@ -216,11 +219,8 @@ public class OrderService {
                 return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), 0, false);
             }
             LocalDateTime now = LocalDateTime.now();
-            if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
-                OrderStateMachine.expirePayment(order, now);
-                tradeOrderRepository.save(order);
-                inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
-                    InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
+            if (isPaymentExpired(order, now)) {
+                expirePayment(order, now);
                 return new OrderTransition(null, order.getCouponUserId(), pointDiscountPoints(order), true);
             }
             OrderStateMachine.pay(order, now);
@@ -237,6 +237,37 @@ public class OrderService {
         deductPointsIfPresent(userId, orderId, transition.pointAmount());
         useCouponIfPresent(userId, transition.couponUserId(), orderId);
         return transition.response();
+    }
+
+    public int closeExpiredUnpaidOrders() {
+        return closeExpiredUnpaidOrders(LocalDateTime.now(), paymentTimeoutCloseBatchSize);
+    }
+
+    public int closeExpiredUnpaidOrders(LocalDateTime now, int batchSize) {
+        List<Long> orderIds = tradeOrderRepository.findExpiredUnpaidOrderIds(
+            OrderStateMachine.ORDER_WAIT_PAY,
+            OrderStateMachine.PAY_UNPAID,
+            now,
+            PageRequest.of(0, Math.max(batchSize, 1))
+        );
+        int closed = 0;
+        for (Long orderId : orderIds) {
+            ExpiredOrderTransition transition = transactionTemplate.execute(status -> {
+                TradeOrder order = tradeOrderRepository.findById(orderId).orElse(null);
+                if (order == null || !isPaymentExpired(order, now)) {
+                    return ExpiredOrderTransition.unchanged();
+                }
+                expirePayment(order, now);
+                return ExpiredOrderTransition.closed(
+                    order.getUserId(), order.getId(), order.getCouponUserId(), pointDiscountPoints(order));
+            });
+            if (transition.closed()) {
+                releaseCouponIfPresent(transition.userId(), transition.couponUserId(), transition.orderId());
+                releasePointsIfPresent(transition.userId(), transition.orderId(), transition.pointAmount());
+                closed++;
+            }
+        }
+        return closed;
     }
 
     public PaymentCallbackResponse handlePaymentCallback(PaymentCallbackRequest request) {
@@ -268,7 +299,7 @@ public class OrderService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "支付金额与订单应付金额不一致");
         }
         LocalDateTime now = LocalDateTime.now();
-        if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
+        if (isPaymentExpired(order, now)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已超过可支付时间");
         }
         if (!OrderStateMachine.ORDER_WAIT_PAY.equals(order.getOrderStatus())
@@ -744,6 +775,20 @@ public class OrderService {
         }
     }
 
+    private boolean isPaymentExpired(TradeOrder order, LocalDateTime now) {
+        return OrderStateMachine.ORDER_WAIT_PAY.equals(order.getOrderStatus())
+            && OrderStateMachine.PAY_UNPAID.equals(order.getPayStatus())
+            && order.getPayExpireTime() != null
+            && !order.getPayExpireTime().isAfter(now);
+    }
+
+    private void expirePayment(TradeOrder order, LocalDateTime now) {
+        OrderStateMachine.expirePayment(order, now);
+        tradeOrderRepository.save(order);
+        inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(order.getId()),
+            InventoryIntegrationEvent.ORDER_CANCELLED, 2, now);
+    }
+
     private void freezePointsIfPresent(Long userId, Long orderId, int points) {
         if (points > 0) {
             memberClient.freezePoints(userId, orderId, pointBizNo(orderId), points);
@@ -1054,6 +1099,16 @@ public class OrderService {
     }
 
     private record OrderTransition(OrderResponse response, Long couponUserId, int pointAmount, boolean expired) {
+    }
+
+    private record ExpiredOrderTransition(boolean closed, Long userId, Long orderId, Long couponUserId, int pointAmount) {
+        static ExpiredOrderTransition unchanged() {
+            return new ExpiredOrderTransition(false, null, null, null, 0);
+        }
+
+        static ExpiredOrderTransition closed(Long userId, Long orderId, Long couponUserId, int pointAmount) {
+            return new ExpiredOrderTransition(true, userId, orderId, couponUserId, pointAmount);
+        }
     }
 
     private record PaymentCallbackTransition(boolean duplicate, Long userId, Long orderId, Long couponUserId, int pointAmount) {

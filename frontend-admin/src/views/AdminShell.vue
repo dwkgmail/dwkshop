@@ -21,7 +21,15 @@ import {
   type InventoryReconciliationReport,
   type OperationLog
 } from '../api/admin';
-import { approveAftersale, getAftersales, rejectAftersale, type Aftersale } from '../api/aftersales';
+import {
+  approveAftersale,
+  closeAftersale,
+  completeAftersaleRefund,
+  confirmAftersaleReturned,
+  getAftersales,
+  rejectAftersale,
+  type Aftersale
+} from '../api/aftersales';
 import { changeAdminPassword, loginAdmin, logoutAdmin } from '../api/auth';
 import { AUTH_EXPIRED_EVENT, clearAuthToken, getAuthToken, setAuthTokens } from '../api/client';
 import { getOrder, getOrders, shipOrder, updateDeliveryStatus, type OrderDetail, type OrderSummary } from '../api/orders';
@@ -214,7 +222,7 @@ const dashboard = computed(() => {
     orderCount: orders.value.length,
     payAmountText: formatCents(payAmount),
     waitShip: orders.value.filter((item) => item.orderStatus === 'WAIT_SHIP').length,
-    refundApplying: aftersales.value.filter((item) => item.aftersaleStatus === 'APPLYING').length,
+    refundApplying: aftersales.value.filter((item) => ['APPLYING', 'WAIT_RETURN', 'REFUNDING'].includes(item.aftersaleStatus)).length,
     couponEnabled: coupons.value.filter((item) => item.couponStatus === 'ENABLED').length,
     activeMembers: members.value.filter((item) => item.status === 'ACTIVE').length
   };
@@ -623,6 +631,30 @@ async function approveRefund(id: number) {
   });
 }
 
+async function confirmReturned(id: number) {
+  await runTask(async () => {
+    await confirmAftersaleReturned(id);
+    await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly(), loadLogsQuietly().catch(() => undefined)]);
+    showToast('退货已确认，退款处理中');
+  });
+}
+
+async function completeRefund(id: number) {
+  await runTask(async () => {
+    await completeAftersaleRefund(id);
+    await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly(), loadLogsQuietly().catch(() => undefined)]);
+    showToast('退款已完成');
+  });
+}
+
+async function closeRefund(id: number) {
+  await runTask(async () => {
+    await closeAftersale(id);
+    await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly(), loadLogsQuietly().catch(() => undefined)]);
+    showToast('售后单已关闭');
+  });
+}
+
 async function rejectRefund(id: number) {
   const rejectReason = window.prompt('请输入拒绝原因', '凭证不足，售后申请被拒绝')?.trim() || '售后申请被拒绝';
   await runTask(async () => {
@@ -734,7 +766,12 @@ function statusText(status: string) {
     DELIVERED: '已送达',
     NONE: '无售后',
     APPLYING: '待审核',
+    APPROVED: '已审核',
+    WAIT_RETURN: '待退货',
+    RETURNED: '已退货',
+    REFUNDING: '退款中',
     REJECTED: '已拒绝',
+    CLOSED: '已关闭',
     FULL_REDUCTION: '满减券'
   };
   return map[status] ?? status;
@@ -947,8 +984,11 @@ onUnmounted(() => {
           <select v-model="aftersaleFilters.status">
             <option value="">全部状态</option>
             <option value="APPLYING">待审核</option>
+            <option value="WAIT_RETURN">待退货</option>
+            <option value="REFUNDING">退款中</option>
             <option value="REFUNDED">已退款</option>
             <option value="REJECTED">已拒绝</option>
+            <option value="CLOSED">已关闭</option>
           </select>
           <button class="primary" type="button" @click="loadAftersales">刷新</button>
         </section>
@@ -968,6 +1008,9 @@ onUnmounted(() => {
                 <td class="actions">
                   <button v-if="item.aftersaleStatus === 'APPLYING'" type="button" @click="approveRefund(item.id)">通过</button>
                   <button v-if="item.aftersaleStatus === 'APPLYING'" type="button" @click="rejectRefund(item.id)">拒绝</button>
+                  <button v-if="item.aftersaleStatus === 'WAIT_RETURN'" type="button" @click="confirmReturned(item.id)">确认退货</button>
+                  <button v-if="item.aftersaleStatus === 'REFUNDING'" type="button" @click="completeRefund(item.id)">完成退款</button>
+                  <button v-if="item.aftersaleStatus === 'REJECTED' || item.aftersaleStatus === 'CANCELED'" type="button" @click="closeRefund(item.id)">关闭</button>
                   <button type="button" @click="openOrderDetail(item.orderId)">订单</button>
                 </td>
               </tr>

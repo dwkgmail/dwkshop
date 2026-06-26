@@ -24,15 +24,27 @@ import org.springframework.web.server.ResponseStatusException;
 public class AftersaleService {
 
     private static final String APPLYING = "APPLYING";
+    private static final String APPROVED = "APPROVED";
     private static final String REFUNDED = "REFUNDED";
     private static final String REJECTED = "REJECTED";
+    private static final String WAIT_RETURN = "WAIT_RETURN";
+    private static final String RETURNED = "RETURNED";
+    private static final String REFUNDING = "REFUNDING";
+    private static final String CLOSED = "CLOSED";
+    private static final String CANCELED = "CANCELED";
     private static final String FLOW_PENDING = "PENDING";
+    private static final String FLOW_APPROVED = "APPROVED";
+    private static final String FLOW_REFUNDING = "REFUNDING";
     private static final String FLOW_COMPLETED = "COMPLETED";
+    private static final String STEP_WAIT_RETURN = "WAIT_RETURN";
     private static final String STEP_EVENT_PENDING = "EVENT_PENDING";
     private static final String REFUND_ONLY = "REFUND_ONLY";
     private static final String RETURN_AND_REFUND = "RETURN_AND_REFUND";
+    private static final String EXCHANGE = "EXCHANGE";
+    private static final String COMPENSATION_REFUND = "COMPENSATION_REFUND";
     private static final String FULL = "FULL";
     private static final String PARTIAL = "PARTIAL";
+    private static final List<String> ACTIVE_STATUSES = List.of(APPLYING, APPROVED, WAIT_RETURN, RETURNED, REFUNDING);
 
     private final AftersaleOrderRepository aftersaleOrderRepository;
     private final AftersaleOrderItemRepository aftersaleOrderItemRepository;
@@ -56,7 +68,7 @@ public class AftersaleService {
 
     @Transactional
     public AftersaleResponse create(Long userId, CreateAftersaleRequest request) {
-        aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(request.orderId(), List.of(APPLYING))
+        aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(request.orderId(), ACTIVE_STATUSES)
             .ifPresent(item -> {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund request already exists");
             });
@@ -117,7 +129,7 @@ public class AftersaleService {
     public AftersaleResponse approve(Long id) {
         AftersaleOrder aftersale = aftersaleOrderRepository.findByIdForUpdate(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
-        if (REFUNDED.equals(aftersale.getAftersaleStatus())) {
+        if (REFUNDED.equals(aftersale.getAftersaleStatus()) || REFUNDING.equals(aftersale.getAftersaleStatus()) || WAIT_RETURN.equals(aftersale.getAftersaleStatus())) {
             return toResponse(aftersale);
         }
         if (!APPLYING.equals(aftersale.getAftersaleStatus())) {
@@ -129,15 +141,58 @@ public class AftersaleService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order is not refundable");
         }
         LocalDateTime now = LocalDateTime.now();
-        aftersale.setAftersaleStatus(REFUNDED);
         aftersale.setAuditTime(now);
+        if (requiresReturn(aftersale)) {
+            aftersale.setAftersaleStatus(WAIT_RETURN);
+            aftersale.setUpdatedAt(now);
+            aftersaleOrderRepository.save(aftersale);
+            saveFlow(loadOrCreateFlow(aftersale), FLOW_APPROVED, STEP_WAIT_RETURN, 0, null);
+            return toResponse(aftersale, approvedOrderSnapshot(orderContext, WAIT_RETURN, "PAID"));
+        }
+        startRefunding(aftersale, orderContext, now);
+        return toResponse(aftersale, approvedOrderSnapshot(orderContext, REFUNDING, "PAID"));
+    }
+
+    @Transactional
+    public AftersaleResponse confirmReturned(Long id) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (REFUNDED.equals(aftersale.getAftersaleStatus()) || REFUNDING.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!WAIT_RETURN.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not waiting for return");
+        }
+        RefundOrderContext orderContext = orderClient.getRefundContext(aftersale.getOrderId());
+        if (!Boolean.TRUE.equals(orderContext.refundable())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order is not refundable");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        aftersale.setAftersaleStatus(RETURNED);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+        startRefunding(aftersale, orderContext, now);
+        return toResponse(aftersale, approvedOrderSnapshot(orderContext, REFUNDING, "PAID"));
+    }
+
+    @Transactional
+    public AftersaleResponse completeRefund(Long id) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (REFUNDED.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!REFUNDING.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not refunding");
+        }
+        AftersaleOrderSnapshot order = orderClient.completeAftersale(aftersale.getOrderId());
+        LocalDateTime now = LocalDateTime.now();
+        aftersale.setAftersaleStatus(REFUNDED);
         aftersale.setRefundTime(now);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
-        List<AftersaleOrderItem> items = aftersaleOrderItemRepository.findByAftersaleIdOrderById(aftersale.getId());
-        refundApprovedOutbox.append(aftersale, orderContext, items, now);
-        saveFlow(loadOrCreateFlow(aftersale), FLOW_COMPLETED, STEP_EVENT_PENDING, 0, null);
-        return toResponse(aftersale, approvedOrderSnapshot(orderContext));
+        saveFlow(loadOrCreateFlow(aftersale), FLOW_COMPLETED, "DONE", 0, null);
+        return toResponse(aftersale, order);
     }
 
     @Transactional
@@ -147,10 +202,10 @@ public class AftersaleService {
         if (REJECTED.equals(aftersale.getAftersaleStatus())) {
             return toResponse(aftersale);
         }
-        if (REFUNDED.equals(aftersale.getAftersaleStatus())) {
+        if (REFUNDED.equals(aftersale.getAftersaleStatus()) || REFUNDING.equals(aftersale.getAftersaleStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is already refunded");
         }
-        if (!APPLYING.equals(aftersale.getAftersaleStatus())) {
+        if (!APPLYING.equals(aftersale.getAftersaleStatus()) && !WAIT_RETURN.equals(aftersale.getAftersaleStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not applying");
         }
         AftersaleOrderSnapshot order = orderClient.rejectAftersale(aftersale.getOrderId());
@@ -164,6 +219,46 @@ public class AftersaleService {
         saveFlow(loadOrCreateFlow(aftersale), REJECTED, "DONE", 0, null);
 
         return toResponse(aftersale, order);
+    }
+
+    @Transactional
+    public AftersaleResponse cancel(Long userId, Long id) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (!aftersale.getUserId().equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found");
+        }
+        if (CANCELED.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!APPLYING.equals(aftersale.getAftersaleStatus()) && !WAIT_RETURN.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale cannot be canceled");
+        }
+        AftersaleOrderSnapshot order = orderClient.rejectAftersale(aftersale.getOrderId());
+        LocalDateTime now = LocalDateTime.now();
+        aftersale.setAftersaleStatus(CANCELED);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+        saveFlow(loadOrCreateFlow(aftersale), CANCELED, "DONE", 0, null);
+        return toResponse(aftersale, order);
+    }
+
+    @Transactional
+    public AftersaleResponse close(Long id) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (CLOSED.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!REJECTED.equals(aftersale.getAftersaleStatus()) && !CANCELED.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only rejected or canceled aftersales can be closed");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        aftersale.setAftersaleStatus(CLOSED);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+        saveFlow(loadOrCreateFlow(aftersale), CLOSED, "DONE", 0, null);
+        return toResponse(aftersale);
     }
 
     private AftersaleResponse toResponse(AftersaleOrder aftersale) {
@@ -235,9 +330,22 @@ public class AftersaleService {
         return base + "-" + action.toUpperCase();
     }
 
-    private AftersaleOrderSnapshot approvedOrderSnapshot(RefundOrderContext context) {
+    private void startRefunding(AftersaleOrder aftersale, RefundOrderContext orderContext, LocalDateTime now) {
+        aftersale.setAftersaleStatus(REFUNDING);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+        List<AftersaleOrderItem> items = aftersaleOrderItemRepository.findByAftersaleIdOrderById(aftersale.getId());
+        refundApprovedOutbox.append(aftersale, orderContext, items, now);
+        saveFlow(loadOrCreateFlow(aftersale), FLOW_REFUNDING, STEP_EVENT_PENDING, 0, null);
+    }
+
+    private boolean requiresReturn(AftersaleOrder aftersale) {
+        return RETURN_AND_REFUND.equals(aftersale.getAftersaleType()) || EXCHANGE.equals(aftersale.getAftersaleType());
+    }
+
+    private AftersaleOrderSnapshot approvedOrderSnapshot(RefundOrderContext context, String aftersaleStatus, String payStatus) {
         return new AftersaleOrderSnapshot(
-            context.orderId(), context.orderNo(), context.userId(), null, context.orderStatus(), "REFUNDED", "REFUNDED",
+            context.orderId(), context.orderNo(), context.userId(), null, context.orderStatus(), payStatus, aftersaleStatus,
             context.payAmount(), context.refundable()
         );
     }
@@ -310,8 +418,8 @@ public class AftersaleService {
 
     private String normalizeAftersaleType(String type) {
         String normalized = normalizeOptionalText(type);
-        if (RETURN_AND_REFUND.equals(normalized)) {
-            return RETURN_AND_REFUND;
+        if (RETURN_AND_REFUND.equals(normalized) || EXCHANGE.equals(normalized) || COMPENSATION_REFUND.equals(normalized)) {
+            return normalized;
         }
         return REFUND_ONLY;
     }

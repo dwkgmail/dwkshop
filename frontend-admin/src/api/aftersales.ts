@@ -41,6 +41,24 @@ export function approveAftersale(id: number) {
   });
 }
 
+export function confirmAftersaleReturned(id: number) {
+  return request<Aftersale>(`/admin/aftersales/${id}/return`, {
+    method: 'POST'
+  });
+}
+
+export function completeAftersaleRefund(id: number) {
+  return request<Aftersale>(`/admin/aftersales/${id}/refund/complete`, {
+    method: 'POST'
+  });
+}
+
+export function closeAftersale(id: number) {
+  return request<Aftersale>(`/admin/aftersales/${id}/close`, {
+    method: 'POST'
+  });
+}
+
 export function rejectAftersale(id: number, rejectReason: string) {
   return request<Aftersale>(`/admin/aftersales/${id}/reject`, {
     method: 'POST',

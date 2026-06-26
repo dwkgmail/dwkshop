@@ -30,6 +30,21 @@ public class AdminAftersaleController {
         return aftersaleService.approve(id);
     }
 
+    @PostMapping("/{id}/return")
+    public AftersaleResponse confirmReturned(@PathVariable Long id) {
+        return aftersaleService.confirmReturned(id);
+    }
+
+    @PostMapping("/{id}/refund/complete")
+    public AftersaleResponse completeRefund(@PathVariable Long id) {
+        return aftersaleService.completeRefund(id);
+    }
+
+    @PostMapping("/{id}/close")
+    public AftersaleResponse close(@PathVariable Long id) {
+        return aftersaleService.close(id);
+    }
+
     @PostMapping("/{id}/reject")
     public AftersaleResponse reject(@PathVariable Long id, @RequestBody(required = false) RejectAftersaleRequest request) {
         return aftersaleService.reject(id, request);

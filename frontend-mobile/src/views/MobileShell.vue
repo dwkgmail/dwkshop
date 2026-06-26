@@ -458,6 +458,9 @@ function statusText(status: string) {
     WAIT_RECEIVE: '待收货',
     FINISHED: '已完成',
     REFUNDED: '已退款',
+    WAIT_RETURN: '待退货',
+    RETURNED: '已退货',
+    REFUNDING: '退款中',
     APPLYING: '退款处理中',
     REJECTED: '退款已拒绝'
   };

@@ -43,6 +43,11 @@ public class AftersaleController {
         return aftersaleService.getUser(resolveUserId(userId), id);
     }
 
+    @PostMapping("/{id}/cancel")
+    public AftersaleResponse cancel(@PathVariable Long id, @RequestParam(required = false) Long userId) {
+        return aftersaleService.cancel(resolveUserId(userId), id);
+    }
+
     private Long resolveUserId(Long userId) {
         if (userId != null) {
             return userId;

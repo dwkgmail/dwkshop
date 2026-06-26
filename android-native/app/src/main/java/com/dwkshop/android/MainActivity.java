@@ -606,6 +606,9 @@ public class MainActivity extends Activity {
         if ("WAIT_RECEIVE".equals(status)) return "待收货";
         if ("FINISHED".equals(status)) return "已完成";
         if ("REFUNDED".equals(status)) return "已退款";
+        if ("WAIT_RETURN".equals(status)) return "待退货";
+        if ("RETURNED".equals(status)) return "已退货";
+        if ("REFUNDING".equals(status)) return "退款中";
         if ("APPLYING".equals(status)) return "退款处理中";
         if ("REJECTED".equals(status)) return "退款已拒绝";
         if ("NONE".equals(status)) return "无";

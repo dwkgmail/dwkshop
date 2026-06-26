@@ -90,6 +90,9 @@ class AftersaleServiceIntegrationTest {
                 List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(501L, 101L, 2, 2, 0, 0, 19900, 0, "NONE", true))
             )
         );
+        when(orderClient.completeAftersale(100L)).thenReturn(
+            new AftersaleOrderSnapshot(100L, "SO202606180100", 1L, "13800000000", "WAIT_SHIP", "REFUNDED", "REFUNDED", 19900, true)
+        );
 
         mockMvc.perform(post("/api/aftersales")
                 .contentType(APPLICATION_JSON)
@@ -112,8 +115,8 @@ class AftersaleServiceIntegrationTest {
         mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
                 .header("Authorization", "Bearer " + adminToken()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
-            .andExpect(jsonPath("$.refundTime").isNotEmpty());
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"))
+            .andExpect(jsonPath("$.refundTime").doesNotExist());
 
         AftersaleOutboxEvent outbox = outboxEventRepository.findAll().get(0);
         assertThat(outbox.getPublishStatus()).isEqualTo("PENDING");
@@ -121,9 +124,15 @@ class AftersaleServiceIntegrationTest {
         assertThat(outbox.getPayloadJson()).contains(created.getAftersaleNo()).contains("\"skuId\":501").contains("\"quantity\":2");
 
         AftersaleRefundFlow flow = refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow();
-        assertThat(flow.getFlowStatus()).isEqualTo("COMPLETED");
+        assertThat(flow.getFlowStatus()).isEqualTo("REFUNDING");
         assertThat(flow.getCurrentStep()).isEqualTo("EVENT_PENDING");
         assertThat(flow.getRetryCount()).isEqualTo(0);
+
+        mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", created.getId())
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
+            .andExpect(jsonPath("$.refundTime").isNotEmpty());
 
         mockMvc.perform(get("/api/aftersales/{id}", created.getId()))
             .andExpect(status().isOk())
@@ -169,17 +178,77 @@ class AftersaleServiceIntegrationTest {
         mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
                 .header("Authorization", "Bearer " + adminToken()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
 
         mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
                 .header("Authorization", "Bearer " + adminToken()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
 
         assertThat(outboxEventRepository.findAll()).hasSize(1);
         assertThat(refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow().getFlowStatus())
-            .isEqualTo("COMPLETED");
+            .isEqualTo("REFUNDING");
         verify(orderClient, times(2)).getRefundContext(102L);
+    }
+
+    @Test
+    void returnRefundWaitsForReturnedGoodsBeforeRefunding() throws Exception {
+        when(orderClient.applyAftersale(103L, 1L)).thenReturn(
+            new AftersaleOrderSnapshot(103L, "SO202606180103", 1L, "13800000003", "WAIT_RECEIVE", "PAID", "NONE", 25900, true)
+        );
+        when(orderClient.getRefundContext(103L)).thenReturn(
+            new RefundOrderContext(
+                103L,
+                "SO202606180103",
+                1L,
+                "WAIT_RECEIVE",
+                "PAID",
+                "SHIPPED",
+                "APPLYING",
+                25900,
+                true,
+                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(504L, 103L, 1, 1, 0, 0, 25900, 0, "NONE", true))
+            )
+        );
+        when(orderClient.completeAftersale(103L)).thenReturn(
+            new AftersaleOrderSnapshot(103L, "SO202606180103", 1L, "13800000003", "WAIT_RECEIVE", "REFUNDED", "REFUNDED", 25900, true)
+        );
+
+        mockMvc.perform(post("/api/aftersales")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": 103,
+                      "aftersaleType": "RETURN_AND_REFUND",
+                      "reason": "Size is not right"
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("APPLYING"))
+            .andExpect(jsonPath("$.aftersaleType").value("RETURN_AND_REFUND"));
+
+        AftersaleOrder created = aftersaleOrderRepository.findAll().get(0);
+
+        mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("WAIT_RETURN"));
+
+        assertThat(outboxEventRepository.findAll()).isEmpty();
+        assertThat(refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow().getCurrentStep())
+            .isEqualTo("WAIT_RETURN");
+
+        mockMvc.perform(post("/admin/aftersales/{id}/return", created.getId())
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
+
+        assertThat(outboxEventRepository.findAll()).hasSize(1);
+
+        mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", created.getId())
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
     }
 
     @Test

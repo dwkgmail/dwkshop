@@ -359,6 +359,61 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     @Test
+    void confirmAndCreateExposePromotionTraceAndItemShares() throws Exception {
+        when(productCatalogClient.getSkuSnapshot(508L)).thenReturn(sku(508L, 5, 2000, true));
+        when(memberClient.getPointAccount(1L)).thenReturn(new MemberPointAccount(1L, 30000));
+        when(marketingClient.selectCoupon(eq(1L), eq(9008L), anyInt())).thenReturn(new MarketingCouponSelection(
+            9008L,
+            500,
+            List.of(new MarketingCoupon(9008L, 108L, "Trace Coupon", "FULL_REDUCTION", 1000, 500, true))
+        ));
+
+        String confirm = mockMvc.perform(post("/api/orders/confirm")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "sourceType": "BUY_NOW",
+                      "skuId": 508,
+                      "quantity": 1,
+                      "addressId": 10,
+                      "couponUserId": 9008,
+                      "usePoints": true
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.amount.promotionTraces[0].promotionType").value("COUPON"))
+            .andExpect(jsonPath("$.amount.promotionTraces[0].ruleId").value("108"))
+            .andExpect(jsonPath("$.amount.promotionTraces[0].items[0].shareAmount").value(500))
+            .andExpect(jsonPath("$.amount.promotionTraces[1].promotionType").value("POINT"))
+            .andExpect(jsonPath("$.items[0].couponShareAmount").value(500))
+            .andExpect(jsonPath("$.items[0].pointShareAmount").value(300))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+        String token = com.jayway.jsonpath.JsonPath.read(confirm, "$.settlementToken");
+
+        mockMvc.perform(post("/api/orders/create")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "settlementToken": "%s",
+                      "expectedPayAmount": 1200
+                    }
+                    """.formatted(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.amount.promotionTraces[0].name").value("Trace Coupon"))
+            .andExpect(jsonPath("$.items[0].promotionShares[0].discountAmount").value(500))
+            .andExpect(jsonPath("$.items[0].promotionShares[1].discountAmount").value(300));
+
+        TradeOrder order = tradeOrderRepository.findAll().get(0);
+        TradeOrderAmount amount = tradeOrderAmountRepository.findByOrderId(order.getId()).orElseThrow();
+        TradeOrderItem item = tradeOrderItemRepository.findByOrderId(order.getId()).get(0);
+        assertThat(amount.getPromotionTraceJson()).contains("\"promotionType\":\"COUPON\"");
+        assertThat(item.getPromotionShareJson()).contains("\"promotionType\":\"POINT\"");
+    }
+
+    @Test
     void scheduledPaymentTimeoutClosesExpiredWaitPayOrderAndReleasesAssets() {
         Long orderId = seedUnpaidOrder("SO202606260010", 1600);
         LocalDateTime now = LocalDateTime.now();

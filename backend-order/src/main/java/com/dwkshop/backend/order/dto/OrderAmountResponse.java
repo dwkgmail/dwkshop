@@ -1,5 +1,7 @@
 package com.dwkshop.backend.order.dto;
 
+import java.util.List;
+
 public record OrderAmountResponse(
     Integer productAmount,
     String productAmountText,
@@ -14,6 +16,8 @@ public record OrderAmountResponse(
     Integer freightDiscountAmount,
     String freightDiscountAmountText,
     Integer payAmount,
-    String payAmountText
+    String payAmountText,
+    List<PromotionTraceResponse> promotionTraces,
+    String promotionTraceJson
 ) {
 }

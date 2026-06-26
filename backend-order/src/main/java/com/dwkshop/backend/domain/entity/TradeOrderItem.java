@@ -73,6 +73,9 @@ public class TradeOrderItem {
     @Column(nullable = false)
     private Integer freightShareAmount;
 
+    @Column(columnDefinition = "TEXT")
+    private String promotionShareJson;
+
     @Column(nullable = false, length = 20)
     private String deliveryType = "NORMAL";
 

@@ -46,5 +46,8 @@ public class TradeOrderAmount {
     @Column(nullable = false)
     private Integer payAmount;
 
+    @Column(columnDefinition = "TEXT")
+    private String promotionTraceJson;
+
     private LocalDateTime createdAt;
 }

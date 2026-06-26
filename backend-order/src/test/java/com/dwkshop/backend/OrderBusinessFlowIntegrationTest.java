@@ -459,8 +459,8 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     private ProductSkuSnapshot sku(Long skuId, int stock, int salePrice, boolean supportPointDeduction) {
-        return new ProductSkuSnapshot(101L, skuId, "Test Product", "/images/product.png", "ON_SALE",
-            "NORMAL", false, true, true, supportPointDeduction, "Notice", "Notice content",
+        return new ProductSkuSnapshot(101L, skuId, 1L, "Test Product", "Test Brand", "/images/product.png", "ON_SALE",
+            "NORMAL", false, true, true, supportPointDeduction, true, 1, "Notice", "Notice content",
             "Default", "{}", salePrice, stock, "ENABLED");
     }
 

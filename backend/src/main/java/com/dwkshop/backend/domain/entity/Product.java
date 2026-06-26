@@ -31,6 +31,9 @@ public class Product {
     @Column(nullable = false, length = 120)
     private String name;
 
+    @Column(nullable = false, length = 120)
+    private String brandName = "";
+
     private String subtitle;
 
     @Column(nullable = false)
@@ -53,6 +56,12 @@ public class Product {
 
     @Column(nullable = false)
     private Boolean supportPointDeduction;
+
+    @Column(nullable = false)
+    private Boolean supportRefund = true;
+
+    @Column(nullable = false)
+    private Integer snapshotVersion = 1;
 
     @Column(nullable = false)
     private Boolean supportPointReward;

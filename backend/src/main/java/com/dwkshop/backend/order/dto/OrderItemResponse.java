@@ -6,11 +6,18 @@ public record OrderItemResponse(
     Long skuId,
     String productName,
     String skuName,
+    String specJson,
+    Long categoryId,
+    String brandName,
     String productImageUrl,
     Integer salePrice,
     String salePriceText,
     Integer quantity,
     Integer payAmount,
-    String payAmountText
+    String payAmountText,
+    String deliveryType,
+    Boolean supportRefund,
+    Boolean supportPointDeduction,
+    Integer snapshotVersion
 ) {
 }

@@ -456,6 +456,9 @@ public class OrderService {
             orderItem.setSkuId(sku.getId());
             orderItem.setProductName(item.product().getName());
             orderItem.setSkuName(sku.getSkuName());
+            orderItem.setSpecJson(sku.getSpecJson());
+            orderItem.setCategoryId(item.product().getCategoryId());
+            orderItem.setBrandName(item.product().getBrandName());
             orderItem.setProductImageUrl(item.product().getMainImageUrl());
             orderItem.setSalePrice(sku.getSalePrice());
             orderItem.setQuantity(item.quantity());
@@ -465,7 +468,10 @@ public class OrderService {
             orderItem.setCouponShareAmount(refundSnapshot.couponShareAmount());
             orderItem.setPointShareAmount(refundSnapshot.pointShareAmount());
             orderItem.setFreightShareAmount(refundSnapshot.freightShareAmount());
-            orderItem.setSupportRefund(true);
+            orderItem.setDeliveryType(item.product().getDeliveryType());
+            orderItem.setSupportRefund(defaultBool(item.product().getSupportRefund(), true));
+            orderItem.setSupportPointDeduction(defaultBool(item.product().getSupportPointDeduction(), false));
+            orderItem.setSnapshotVersion(defaultInt(item.product().getSnapshotVersion(), 1));
             orderItem.setAftersaleQuantity(0);
             orderItem.setRefundableQuantity(item.quantity());
             orderItem.setRefundedQuantity(0);
@@ -664,12 +670,19 @@ public class OrderService {
             item.getSkuId(),
             item.getProductName(),
             item.getSkuName(),
+            item.getSpecJson(),
+            item.getCategoryId(),
+            item.getBrandName(),
             item.getProductImageUrl(),
             item.getSalePrice(),
             PriceFormatter.formatCents(item.getSalePrice()),
             item.getQuantity(),
             item.getPayAmount(),
-            PriceFormatter.formatCents(item.getPayAmount())
+            PriceFormatter.formatCents(item.getPayAmount()),
+            item.getDeliveryType(),
+            item.getSupportRefund(),
+            item.getSupportPointDeduction(),
+            item.getSnapshotVersion()
         );
     }
 
@@ -745,6 +758,14 @@ public class OrderService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private Boolean defaultBool(Boolean value, boolean defaultValue) {
+        return value == null ? defaultValue : value;
+    }
+
+    private Integer defaultInt(Integer value, int defaultValue) {
+        return value == null ? defaultValue : value;
     }
 
     private record SettlementItem(Long cartItemId, Product product, ProductSku sku, ProductNotice notice, int quantity) {

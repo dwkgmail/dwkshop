@@ -712,6 +712,9 @@ public class OrderService {
             orderItem.setSkuId(item.sku().skuId());
             orderItem.setProductName(item.sku().productName());
             orderItem.setSkuName(item.sku().skuName());
+            orderItem.setSpecJson(item.sku().specJson());
+            orderItem.setCategoryId(item.sku().categoryId());
+            orderItem.setBrandName(item.sku().brandName());
             orderItem.setProductImageUrl(item.sku().productImageUrl());
             orderItem.setSalePrice(item.sku().salePrice());
             orderItem.setQuantity(item.quantity());
@@ -721,7 +724,10 @@ public class OrderService {
             orderItem.setCouponShareAmount(refundSnapshot.couponShareAmount());
             orderItem.setPointShareAmount(refundSnapshot.pointShareAmount());
             orderItem.setFreightShareAmount(refundSnapshot.freightShareAmount());
-            orderItem.setSupportRefund(true);
+            orderItem.setDeliveryType(item.sku().deliveryType());
+            orderItem.setSupportRefund(defaultBool(item.sku().supportRefund(), true));
+            orderItem.setSupportPointDeduction(defaultBool(item.sku().supportPointDeduction(), false));
+            orderItem.setSnapshotVersion(defaultInt(item.sku().snapshotVersion(), 1));
             orderItem.setAftersaleQuantity(0);
             orderItem.setRefundableQuantity(item.quantity());
             orderItem.setRefundedQuantity(0);
@@ -972,12 +978,19 @@ public class OrderService {
             item.getSkuId(),
             item.getProductName(),
             item.getSkuName(),
+            item.getSpecJson(),
+            item.getCategoryId(),
+            item.getBrandName(),
             item.getProductImageUrl(),
             item.getSalePrice(),
             PriceFormatter.formatCents(item.getSalePrice()),
             item.getQuantity(),
             item.getPayAmount(),
             PriceFormatter.formatCents(item.getPayAmount()),
+            item.getDeliveryType(),
+            item.getSupportRefund(),
+            item.getSupportPointDeduction(),
+            item.getSnapshotVersion(),
             item.getRefundableQuantity(),
             item.getRefundedQuantity(),
             item.getAftersaleQuantity(),
@@ -1132,6 +1145,14 @@ public class OrderService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
         }
         return normalized;
+    }
+
+    private Boolean defaultBool(Boolean value, boolean defaultValue) {
+        return value == null ? defaultValue : value;
+    }
+
+    private Integer defaultInt(Integer value, int defaultValue) {
+        return value == null ? defaultValue : value;
     }
 
     private String callbackRequestNo(String channelTradeNo) {

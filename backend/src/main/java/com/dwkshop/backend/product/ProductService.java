@@ -175,6 +175,7 @@ public class ProductService {
         product.setCategoryId(request.categoryId());
         product.setProductCode(blankToDefault(request.productCode(), "P-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase()));
         product.setName(request.name().trim());
+        product.setBrandName(blankToDefault(request.brandName(), ""));
         product.setSubtitle(request.subtitle());
         product.setMainImageUrl(request.mainImageUrl());
         product.setProductType(blankToDefault(request.productType(), NORMAL));
@@ -183,13 +184,17 @@ public class ProductService {
         product.setAllowCart(defaultBool(request.allowCart(), true));
         product.setAllowSingleBuy(defaultBool(request.allowSingleBuy(), true));
         product.setSupportPointDeduction(defaultBool(request.pointDeductEnabled(), false));
+        product.setSupportRefund(defaultBool(request.supportRefund(), true));
         product.setSupportPointReward(defaultBool(request.pointRewardEnabled(), false));
         product.setPointReward(defaultInt(request.pointReward(), 0));
         product.setVirtualSales(defaultInt(request.virtualSales(), 0));
         if (creating) {
+            product.setSnapshotVersion(1);
             product.setActualSales(0);
             product.setDeletedFlag(false);
             product.setCreatedAt(now);
+        } else {
+            product.setSnapshotVersion(defaultInt(product.getSnapshotVersion(), 1) + 1);
         }
         product.setUpdatedAt(now);
     }
@@ -287,6 +292,7 @@ public class ProductService {
             product.getCategoryId(),
             product.getProductCode(),
             product.getName(),
+            product.getBrandName(),
             product.getSubtitle(),
             product.getMainImageUrl(),
             product.getProductType(),
@@ -297,6 +303,7 @@ public class ProductService {
             product.getAllowCart(),
             product.getAllowSingleBuy(),
             product.getSupportPointDeduction(),
+            product.getSupportRefund(),
             product.getSupportPointReward(),
             product.getPointReward(),
             product.getActualSales() + product.getVirtualSales(),
@@ -314,6 +321,7 @@ public class ProductService {
             product.getCategoryId(),
             product.getProductCode(),
             product.getName(),
+            product.getBrandName(),
             product.getSubtitle(),
             product.getMainImageUrl(),
             product.getProductType(),
@@ -322,6 +330,7 @@ public class ProductService {
             product.getAllowCart(),
             product.getAllowSingleBuy(),
             product.getSupportPointDeduction(),
+            product.getSupportRefund(),
             product.getSupportPointReward(),
             product.getPointReward(),
             product.getVirtualSales(),

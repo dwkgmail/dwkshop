@@ -45,6 +45,7 @@ public class InventoryIntegrationEventConsumer {
         boolean stale = state != null && event.eventVersion() < state.getLastEventVersion();
         if (!stale) {
             if (InventoryIntegrationEvent.ORDER_CREATED.equals(event.eventType())) lock(state, event, item);
+            else if (InventoryIntegrationEvent.PAYMENT_SUCCEEDED.equals(event.eventType())) markPaid(state, event, item);
             else if (InventoryIntegrationEvent.ORDER_CANCELLED.equals(event.eventType())
                 || InventoryIntegrationEvent.REFUND_APPROVED.equals(event.eventType())) release(state, event, item);
             else throw new IllegalArgumentException("Unsupported inventory event type " + event.eventType());
@@ -63,9 +64,21 @@ public class InventoryIntegrationEventConsumer {
         saveState(state, event, item, "LOCKED");
     }
 
+    private void markPaid(InventoryOrderItemState state, InventoryIntegrationEvent event, InventoryIntegrationEvent.Item item) {
+        if (state == null || "RELEASED".equals(state.getState())) {
+            saveState(state, event, item, "RELEASED");
+            return;
+        }
+        if ("LOCKED".equals(state.getState()) || "PAID".equals(state.getState())) {
+            saveState(state, event, item, "PAID");
+            return;
+        }
+        throw new IllegalStateException("Order item is not payable for sku " + item.skuId());
+    }
+
     private void release(InventoryOrderItemState state, InventoryIntegrationEvent event, InventoryIntegrationEvent.Item item) {
         if (state != null && "RELEASED".equals(state.getState())) return;
-        if ((state != null && "LOCKED".equals(state.getState()))
+        if ((state != null && ("LOCKED".equals(state.getState()) || "PAID".equals(state.getState())))
             || (state == null && InventoryIntegrationEvent.REFUND_APPROVED.equals(event.eventType()))) {
             ProductSku sku = loadSku(item.skuId());
             if (sku.getLockedStock() < item.quantity()) throw new IllegalStateException("Insufficient locked stock for sku " + item.skuId());

@@ -15,6 +15,7 @@ public record InventoryIntegrationEvent(
 ) {
     public static final String ORDER_CREATED = "ORDER_CREATED";
     public static final String ORDER_CANCELLED = "ORDER_CANCELLED";
+    public static final String PAYMENT_SUCCEEDED = "PAYMENT_SUCCEEDED";
     public static final String REFUND_APPROVED = "REFUND_APPROVED";
 
     public record Item(Long skuId, Integer quantity) {}

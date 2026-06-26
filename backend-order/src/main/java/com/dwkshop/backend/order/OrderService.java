@@ -1,9 +1,13 @@
 package com.dwkshop.backend.order;
 
+import com.dwkshop.backend.domain.entity.PaymentOrder;
+import com.dwkshop.backend.domain.entity.PaymentTransaction;
 import com.dwkshop.backend.domain.entity.TradeOrder;
 import com.dwkshop.backend.domain.entity.TradeOrderAmount;
 import com.dwkshop.backend.domain.entity.TradeOrderItem;
 import com.dwkshop.backend.domain.repository.OrderOutboxEventRepository;
+import com.dwkshop.backend.domain.repository.PaymentOrderRepository;
+import com.dwkshop.backend.domain.repository.PaymentTransactionRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
@@ -21,8 +25,11 @@ import com.dwkshop.backend.order.dto.OrderAmountResponse;
 import com.dwkshop.backend.order.dto.OrderItemResponse;
 import com.dwkshop.backend.order.dto.OrderResponse;
 import com.dwkshop.backend.order.dto.OrderSummaryResponse;
+import com.dwkshop.backend.order.dto.PaymentCallbackRequest;
+import com.dwkshop.backend.order.dto.PaymentCallbackResponse;
 import com.dwkshop.backend.order.dto.PointDeductionResponse;
 import com.dwkshop.backend.util.PriceFormatter;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -31,6 +38,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -54,6 +62,8 @@ public class OrderService {
     private final TradeOrderItemRepository tradeOrderItemRepository;
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
     private final OrderOutboxEventRepository orderOutboxEventRepository;
+    private final PaymentOrderRepository paymentOrderRepository;
+    private final PaymentTransactionRepository paymentTransactionRepository;
     private final SettlementSessionStore settlementSessionStore;
     private final CartClient cartClient;
     private final MemberClient memberClient;
@@ -68,6 +78,8 @@ public class OrderService {
         TradeOrderItemRepository tradeOrderItemRepository,
         TradeOrderAmountRepository tradeOrderAmountRepository,
         OrderOutboxEventRepository orderOutboxEventRepository,
+        PaymentOrderRepository paymentOrderRepository,
+        PaymentTransactionRepository paymentTransactionRepository,
         SettlementSessionStore settlementSessionStore,
         CartClient cartClient,
         MemberClient memberClient,
@@ -81,6 +93,8 @@ public class OrderService {
         this.tradeOrderItemRepository = tradeOrderItemRepository;
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
         this.orderOutboxEventRepository = orderOutboxEventRepository;
+        this.paymentOrderRepository = paymentOrderRepository;
+        this.paymentTransactionRepository = paymentTransactionRepository;
         this.settlementSessionStore = settlementSessionStore;
         this.cartClient = cartClient;
         this.memberClient = memberClient;
@@ -211,6 +225,8 @@ public class OrderService {
             }
             OrderStateMachine.pay(order, now);
             tradeOrderRepository.save(order);
+            inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
+                InventoryIntegrationEvent.PAYMENT_SUCCEEDED, 2, now);
             return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), pointDiscountPoints(order), false);
         });
         if (transition.expired()) {
@@ -221,6 +237,126 @@ public class OrderService {
         deductPointsIfPresent(userId, orderId, transition.pointAmount());
         useCouponIfPresent(userId, transition.couponUserId(), orderId);
         return transition.response();
+    }
+
+    public PaymentCallbackResponse handlePaymentCallback(PaymentCallbackRequest request) {
+        PaymentCallbackTransition transition;
+        try {
+            transition = transactionTemplate.execute(status -> applyPaymentCallback(request));
+        } catch (DataIntegrityViolationException ex) {
+            if (isSuccessfulCallbackRecorded(request.channelTradeNo())) {
+                return PaymentCallbackResponse.duplicated();
+            }
+            throw ex;
+        }
+        if (transition.duplicate()) {
+            return PaymentCallbackResponse.duplicated();
+        }
+        deductPointsIfPresent(transition.userId(), transition.orderId(), transition.pointAmount());
+        useCouponIfPresent(transition.userId(), transition.couponUserId(), transition.orderId());
+        return PaymentCallbackResponse.processed();
+    }
+
+    private PaymentCallbackTransition applyPaymentCallback(PaymentCallbackRequest request) {
+        String channelTradeNo = normalizeRequiredText(request.channelTradeNo(), "channelTradeNo不能为空");
+        if (isSuccessfulCallbackRecorded(channelTradeNo)) {
+            return PaymentCallbackTransition.duplicated();
+        }
+
+        TradeOrder order = resolvePaymentCallbackOrder(request);
+        if (!order.getPayAmount().equals(request.amount())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "支付金额与订单应付金额不一致");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (order.getPayExpireTime() != null && order.getPayExpireTime().isBefore(now)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已超过可支付时间");
+        }
+        if (!OrderStateMachine.ORDER_WAIT_PAY.equals(order.getOrderStatus())
+            || !OrderStateMachine.PAY_UNPAID.equals(order.getPayStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单当前状态不可支付");
+        }
+
+        PaymentOrder paymentOrder = resolvePaymentOrder(request, order, now);
+        LocalDateTime paidAt = request.paidAt() == null ? now : request.paidAt();
+        OrderStateMachine.pay(order, paidAt);
+        tradeOrderRepository.save(order);
+        inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(order.getId()),
+            InventoryIntegrationEvent.PAYMENT_SUCCEEDED, 2, paidAt);
+
+        paymentOrder.setStatus("PAID");
+        paymentOrder.setAmount(request.amount());
+        paymentOrder.setChannelTradeNo(channelTradeNo);
+        paymentOrder.setPaidAt(paidAt);
+        paymentOrder.setCallbackPayload(request.callbackPayload());
+        paymentOrder.setUpdatedAt(now);
+        paymentOrderRepository.save(paymentOrder);
+
+        PaymentTransaction transaction = new PaymentTransaction();
+        transaction.setPaymentNo(paymentOrder.getPaymentNo());
+        transaction.setOrderId(order.getId());
+        transaction.setUserId(order.getUserId());
+        transaction.setChannel(normalizeOptionalText(request.channel()) == null ? "UNKNOWN" : normalizeOptionalText(request.channel()));
+        transaction.setAmount(request.amount());
+        transaction.setStatus("SUCCESS");
+        transaction.setRequestNo(callbackRequestNo(channelTradeNo));
+        transaction.setChannelTradeNo(channelTradeNo);
+        transaction.setPaidAt(paidAt);
+        transaction.setCallbackPayload(request.callbackPayload());
+        transaction.setCreatedAt(now);
+        transaction.setUpdatedAt(now);
+        paymentTransactionRepository.saveAndFlush(transaction);
+
+        return PaymentCallbackTransition.processed(
+            order.getUserId(), order.getId(), order.getCouponUserId(), pointDiscountPoints(order));
+    }
+
+    private boolean isSuccessfulCallbackRecorded(String channelTradeNo) {
+        String normalized = normalizeOptionalText(channelTradeNo);
+        if (normalized == null) {
+            return false;
+        }
+        return paymentTransactionRepository.findByChannelTradeNo(normalized)
+            .filter(transaction -> "SUCCESS".equals(transaction.getStatus()))
+            .isPresent();
+    }
+
+    private TradeOrder resolvePaymentCallbackOrder(PaymentCallbackRequest request) {
+        String paymentNo = normalizeOptionalText(request.paymentNo());
+        if (paymentNo != null) {
+            PaymentOrder paymentOrder = paymentOrderRepository.findByPaymentNo(paymentNo)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "支付单不存在"));
+            return tradeOrderRepository.findById(paymentOrder.getOrderId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+        }
+        if (request.orderId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "orderId或paymentNo不能为空");
+        }
+        return tradeOrderRepository.findById(request.orderId())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+    }
+
+    private PaymentOrder resolvePaymentOrder(PaymentCallbackRequest request, TradeOrder order, LocalDateTime now) {
+        String paymentNo = normalizeOptionalText(request.paymentNo());
+        PaymentOrder existing = paymentNo == null
+            ? paymentOrderRepository.findByOrderId(order.getId()).orElse(null)
+            : paymentOrderRepository.findByPaymentNo(paymentNo).orElse(null);
+        if (existing != null) {
+            if (!existing.getOrderId().equals(order.getId())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "支付单与订单不匹配");
+            }
+            return existing;
+        }
+        PaymentOrder paymentOrder = new PaymentOrder();
+        paymentOrder.setPaymentNo(paymentNo == null ? "PAY-" + order.getOrderNo() : paymentNo);
+        paymentOrder.setOrderId(order.getId());
+        paymentOrder.setUserId(order.getUserId());
+        paymentOrder.setChannel(normalizeOptionalText(request.channel()) == null ? "UNKNOWN" : normalizeOptionalText(request.channel()));
+        paymentOrder.setAmount(request.amount());
+        paymentOrder.setStatus("INIT");
+        paymentOrder.setRequestNo(callbackRequestNo(normalizeRequiredText(request.channelTradeNo(), "channelTradeNo不能为空")));
+        paymentOrder.setCreatedAt(now);
+        paymentOrder.setUpdatedAt(now);
+        return paymentOrderRepository.save(paymentOrder);
     }
 
     @Transactional
@@ -880,6 +1016,19 @@ public class OrderService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
+    private String normalizeRequiredText(String value, String message) {
+        String normalized = normalizeOptionalText(value);
+        if (normalized == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
+        }
+        return normalized;
+    }
+
+    private String callbackRequestNo(String channelTradeNo) {
+        UUID stableId = UUID.nameUUIDFromBytes(channelTradeNo.getBytes(StandardCharsets.UTF_8));
+        return "CALLBACK:" + stableId;
+    }
+
     private record SettlementItem(Long cartItemId, ProductSkuSnapshot sku, int quantity) {
         int totalAmount() {
             return sku.salePrice() * quantity;
@@ -905,6 +1054,16 @@ public class OrderService {
     }
 
     private record OrderTransition(OrderResponse response, Long couponUserId, int pointAmount, boolean expired) {
+    }
+
+    private record PaymentCallbackTransition(boolean duplicate, Long userId, Long orderId, Long couponUserId, int pointAmount) {
+        static PaymentCallbackTransition duplicated() {
+            return new PaymentCallbackTransition(true, null, null, null, 0);
+        }
+
+        static PaymentCallbackTransition processed(Long userId, Long orderId, Long couponUserId, int pointAmount) {
+            return new PaymentCallbackTransition(false, userId, orderId, couponUserId, pointAmount);
+        }
     }
 
 }

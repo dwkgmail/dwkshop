@@ -1,9 +1,13 @@
 package com.dwkshop.backend.order;
 
+import com.dwkshop.backend.order.dto.PaymentCallbackRequest;
+import com.dwkshop.backend.order.dto.PaymentCallbackResponse;
+import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -51,5 +55,10 @@ public class OrderInternalController {
     @PostMapping("/{orderId}/aftersale/reject")
     public AftersaleOrderSnapshot rejectAftersale(@PathVariable Long orderId) {
         return orderService.rejectAftersale(orderId);
+    }
+
+    @PostMapping("/payments/callback")
+    public PaymentCallbackResponse handlePaymentCallback(@Valid @RequestBody PaymentCallbackRequest request) {
+        return orderService.handlePaymentCallback(request);
     }
 }

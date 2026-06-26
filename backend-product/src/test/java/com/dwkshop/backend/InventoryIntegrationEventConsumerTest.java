@@ -131,6 +131,20 @@ class InventoryIntegrationEventConsumerTest {
             .isEqualTo("RELEASED");
     }
 
+    @Test
+    void paymentSucceededMarksLockedStockAsPaidWithoutChangingQuantity() {
+        ProductSku sku = sku(10, 0);
+        consumer.consume(event("create-before-pay", InventoryIntegrationEvent.ORDER_CREATED, 1, 401L, sku.getId(), 2));
+        consumer.consume(event("pay-success", InventoryIntegrationEvent.PAYMENT_SUCCEEDED, 2, 401L, sku.getId(), 2));
+        consumer.consume(event("refund-after-pay", InventoryIntegrationEvent.REFUND_APPROVED, 3, 401L, sku.getId(), 2));
+
+        ProductSku result = skuRepository.findById(sku.getId()).orElseThrow();
+        assertThat(result.getStock()).isEqualTo(10);
+        assertThat(result.getLockedStock()).isZero();
+        assertThat(stateRepository.findByOrderIdAndSkuId(401L, sku.getId()).orElseThrow().getState())
+            .isEqualTo("RELEASED");
+    }
+
     private InventoryIntegrationEvent event(String id, String type, int version, Long orderId, Long skuId, int quantity) {
         return new InventoryIntegrationEvent(id, type, version, orderId, "SO-" + orderId,
             LocalDateTime.now(), List.of(new InventoryIntegrationEvent.Item(skuId, quantity)));

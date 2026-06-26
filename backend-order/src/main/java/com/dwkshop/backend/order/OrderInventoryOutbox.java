@@ -35,6 +35,7 @@ public class OrderInventoryOutbox {
         outbox.setRoutingKey(switch (eventType) {
             case InventoryIntegrationEvent.ORDER_CREATED -> "inventory.order-created";
             case InventoryIntegrationEvent.ORDER_CANCELLED -> "inventory.order-cancelled";
+            case InventoryIntegrationEvent.PAYMENT_SUCCEEDED -> "inventory.payment-succeeded";
             default -> throw new IllegalArgumentException("Unsupported order inventory event " + eventType);
         });
         try {

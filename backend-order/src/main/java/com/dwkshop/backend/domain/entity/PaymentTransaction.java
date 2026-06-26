@@ -43,7 +43,7 @@ public class PaymentTransaction {
     @Column(nullable = false, unique = true, length = 64)
     private String requestNo;
 
-    @Column(length = 128)
+    @Column(length = 128, unique = true)
     private String channelTradeNo;
 
     private LocalDateTime paidAt;

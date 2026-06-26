@@ -9,5 +9,7 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
 
     Optional<PaymentTransaction> findByRequestNo(String requestNo);
 
+    Optional<PaymentTransaction> findByChannelTradeNo(String channelTradeNo);
+
     List<PaymentTransaction> findByPaymentNoOrderByCreatedAtDesc(String paymentNo);
 }

@@ -6,9 +6,12 @@ import com.dwkshop.backend.domain.entity.TradeOrder;
 import com.dwkshop.backend.domain.entity.TradeOrderAmount;
 import com.dwkshop.backend.domain.entity.TradeOrderItem;
 import com.dwkshop.backend.domain.repository.OrderOutboxEventRepository;
+import com.dwkshop.backend.domain.repository.PaymentOrderRepository;
+import com.dwkshop.backend.domain.repository.PaymentTransactionRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderAmountRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderItemRepository;
 import com.dwkshop.backend.domain.repository.TradeOrderRepository;
+import com.dwkshop.backend.event.InventoryIntegrationEvent;
 import com.dwkshop.backend.order.CartClient;
 import com.dwkshop.backend.order.MarketingClient;
 import com.dwkshop.backend.order.MarketingCoupon;
@@ -57,6 +60,8 @@ class OrderBusinessFlowIntegrationTest {
     @Autowired TradeOrderItemRepository tradeOrderItemRepository;
     @Autowired TradeOrderAmountRepository tradeOrderAmountRepository;
     @Autowired OrderOutboxEventRepository orderOutboxEventRepository;
+    @Autowired PaymentOrderRepository paymentOrderRepository;
+    @Autowired PaymentTransactionRepository paymentTransactionRepository;
     @Autowired AuthTokenService authTokenService;
 
     @MockBean CartClient cartClient;
@@ -66,6 +71,8 @@ class OrderBusinessFlowIntegrationTest {
 
     @BeforeEach
     void resetState() {
+        paymentTransactionRepository.deleteAllInBatch();
+        paymentOrderRepository.deleteAllInBatch();
         orderOutboxEventRepository.deleteAllInBatch();
         tradeOrderItemRepository.deleteAllInBatch();
         tradeOrderAmountRepository.deleteAllInBatch();
@@ -279,6 +286,101 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     @Test
+    void paymentCallbackIsIdempotentByChannelTradeNoAndEmitsSuccessEventOnce() throws Exception {
+        Long orderId = seedUnpaidOrder("SO202606260001", 1600);
+
+        mockMvc.perform(post("/internal/orders/payments/callback")
+                .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": %d,
+                      "channel": "WECHAT",
+                      "channelTradeNo": "wx-trade-001",
+                      "amount": 1600,
+                      "callbackPayload": "{\\"trade_state\\":\\"SUCCESS\\"}"
+                    }
+                    """.formatted(orderId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.duplicate").value(false));
+
+        mockMvc.perform(post("/internal/orders/payments/callback")
+                .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": %d,
+                      "channel": "WECHAT",
+                      "channelTradeNo": "wx-trade-001",
+                      "amount": 1600
+                    }
+                    """.formatted(orderId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.success").value(true))
+            .andExpect(jsonPath("$.duplicate").value(true));
+
+        TradeOrder paid = tradeOrderRepository.findById(orderId).orElseThrow();
+        assertThat(paid.getOrderStatus()).isEqualTo("WAIT_SHIP");
+        assertThat(paid.getPayStatus()).isEqualTo("PAID");
+        assertThat(paymentTransactionRepository.count()).isEqualTo(1);
+        assertThat(paymentOrderRepository.count()).isEqualTo(1);
+        assertThat(orderOutboxEventRepository.count()).isEqualTo(1);
+        assertThat(orderOutboxEventRepository.findAll().get(0).getEventType())
+            .isEqualTo(InventoryIntegrationEvent.PAYMENT_SUCCEEDED);
+    }
+
+    @Test
+    void paymentCallbackRejectsAmountMismatch() throws Exception {
+        Long orderId = seedUnpaidOrder("SO202606260002", 1600);
+
+        mockMvc.perform(post("/internal/orders/payments/callback")
+                .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": %d,
+                      "channel": "WECHAT",
+                      "channelTradeNo": "wx-trade-amount-mismatch",
+                      "amount": 1500
+                    }
+                    """.formatted(orderId)))
+            .andExpect(status().isBadRequest());
+
+        TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
+        assertThat(order.getOrderStatus()).isEqualTo("WAIT_PAY");
+        assertThat(order.getPayStatus()).isEqualTo("UNPAID");
+        assertThat(paymentTransactionRepository.count()).isZero();
+        assertThat(orderOutboxEventRepository.count()).isZero();
+    }
+
+    @Test
+    void paymentCallbackRejectsNonPayableOrderState() throws Exception {
+        Long orderId = seedUnpaidOrder("SO202606260003", 1600);
+        TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
+        order.setOrderStatus("CANCELED");
+        order.setPayStatus("CLOSED");
+        order.setCancelTime(LocalDateTime.now());
+        tradeOrderRepository.save(order);
+
+        mockMvc.perform(post("/internal/orders/payments/callback")
+                .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": %d,
+                      "channel": "WECHAT",
+                      "channelTradeNo": "wx-trade-canceled",
+                      "amount": 1600
+                    }
+                    """.formatted(orderId)))
+            .andExpect(status().isBadRequest());
+
+        assertThat(paymentTransactionRepository.count()).isZero();
+        assertThat(orderOutboxEventRepository.count()).isZero();
+    }
+
+    @Test
     void adminShippingStateMachineRejectsInvalidTransitionsAndCompletesDelivery() throws Exception {
         Long orderId = seedPaidOrder("SO202606230001");
 
@@ -361,6 +463,53 @@ class OrderBusinessFlowIntegrationTest {
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
         return tradeOrderRepository.save(order).getId();
+    }
+
+    private Long seedUnpaidOrder(String orderNo, int payAmount) {
+        LocalDateTime now = LocalDateTime.of(2026, 6, 26, 10, 0);
+        TradeOrder order = new TradeOrder();
+        order.setOrderNo(orderNo);
+        order.setUserId(1L);
+        order.setOrderStatus("WAIT_PAY");
+        order.setPayStatus("UNPAID");
+        order.setDeliveryStatus("UNSHIPPED");
+        order.setAftersaleStatus("NONE");
+        order.setSourceType("BUY_NOW");
+        order.setTotalAmount(payAmount);
+        order.setDiscountAmount(0);
+        order.setCouponAmount(0);
+        order.setPointAmount(0);
+        order.setFreightAmount(0);
+        order.setPayAmount(payAmount);
+        order.setReceiverName("Alice");
+        order.setReceiverMobile("13800000000");
+        order.setReceiverAddress("Shanghai Pudong Century Ave 1");
+        order.setPayExpireTime(LocalDateTime.now().plusMinutes(30));
+        order.setCreatedAt(now);
+        order.setUpdatedAt(now);
+        TradeOrder savedOrder = tradeOrderRepository.save(order);
+
+        TradeOrderItem item = new TradeOrderItem();
+        item.setOrderId(savedOrder.getId());
+        item.setProductId(101L);
+        item.setSkuId(501L);
+        item.setProductName("Test Product");
+        item.setSkuName("Default");
+        item.setProductImageUrl("/images/product.png");
+        item.setSalePrice(payAmount);
+        item.setQuantity(1);
+        item.setTotalAmount(payAmount);
+        item.setDiscountAmount(0);
+        item.setPayAmount(payAmount);
+        item.setSupportRefund(true);
+        item.setAftersaleQuantity(0);
+        item.setRefundableQuantity(1);
+        item.setRefundedQuantity(0);
+        item.setRefundAmount(0);
+        item.setRefundStatus("NONE");
+        item.setCreatedAt(now);
+        tradeOrderItemRepository.save(item);
+        return savedOrder.getId();
     }
 
     private String adminToken() {

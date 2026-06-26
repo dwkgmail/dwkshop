@@ -41,7 +41,7 @@ The frontend can continue to call `http://localhost:8080` because the gateway ke
 | auth-service | `user`, `admin_user`, token issuing | token claims |
 | product-service | `product`, `product_sku`, `product_category`, `product_notice`, search index | product query API |
 | cart-service | `cart_item` | product snapshot/query API |
-| order-service | `trade_order`, `trade_order_item`, `trade_order_amount`, settlement sessions | cart, product, coupon, point, address APIs and events |
+| order-service | `trade_order`, `trade_order_item`, `trade_order_amount`, `payment_order`, `payment_transaction`, settlement sessions | cart, product, coupon, point, address APIs and events |
 | aftersale-service | `aftersale_order` | order query API and order events |
 | marketing-service | `coupon`, `coupon_user` | coupon reservation/use API |
 | member-service | `user_address`, `user_point_account`, `user_point_flow` | address and point APIs |

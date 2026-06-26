@@ -4,6 +4,7 @@ import com.dwkshop.backend.aftersale.dto.AftersaleResponse;
 import com.dwkshop.backend.aftersale.dto.AftersaleItemResponse;
 import com.dwkshop.backend.aftersale.dto.CreateAftersaleRequest;
 import com.dwkshop.backend.aftersale.dto.RejectAftersaleRequest;
+import com.dwkshop.backend.aftersale.dto.RefundFailureRequest;
 import com.dwkshop.backend.domain.entity.AftersaleOrderItem;
 import com.dwkshop.backend.domain.entity.AftersaleOrder;
 import com.dwkshop.backend.domain.entity.AftersaleRefundFlow;
@@ -30,12 +31,14 @@ public class AftersaleService {
     private static final String WAIT_RETURN = "WAIT_RETURN";
     private static final String RETURNED = "RETURNED";
     private static final String REFUNDING = "REFUNDING";
+    private static final String REFUND_FAILED = "REFUND_FAILED";
     private static final String CLOSED = "CLOSED";
     private static final String CANCELED = "CANCELED";
     private static final String FLOW_PENDING = "PENDING";
     private static final String FLOW_APPROVED = "APPROVED";
     private static final String FLOW_REFUNDING = "REFUNDING";
     private static final String FLOW_COMPLETED = "COMPLETED";
+    private static final String FLOW_FAILED = "FAILED";
     private static final String STEP_WAIT_RETURN = "WAIT_RETURN";
     private static final String STEP_EVENT_PENDING = "EVENT_PENDING";
     private static final String REFUND_ONLY = "REFUND_ONLY";
@@ -44,7 +47,7 @@ public class AftersaleService {
     private static final String COMPENSATION_REFUND = "COMPENSATION_REFUND";
     private static final String FULL = "FULL";
     private static final String PARTIAL = "PARTIAL";
-    private static final List<String> ACTIVE_STATUSES = List.of(APPLYING, APPROVED, WAIT_RETURN, RETURNED, REFUNDING);
+    private static final List<String> ACTIVE_STATUSES = List.of(APPLYING, APPROVED, WAIT_RETURN, RETURNED, REFUNDING, REFUND_FAILED);
 
     private final AftersaleOrderRepository aftersaleOrderRepository;
     private final AftersaleOrderItemRepository aftersaleOrderItemRepository;
@@ -193,6 +196,48 @@ public class AftersaleService {
         aftersaleOrderRepository.save(aftersale);
         saveFlow(loadOrCreateFlow(aftersale), FLOW_COMPLETED, "DONE", 0, null);
         return toResponse(aftersale, order);
+    }
+
+    @Transactional
+    public AftersaleResponse failRefund(Long id, RefundFailureRequest request) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (REFUND_FAILED.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!REFUNDING.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not refunding");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        String failureReason = normalizeFailureReason(request);
+        aftersale.setAftersaleStatus(REFUND_FAILED);
+        aftersale.setRejectReason(failureReason);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+        AftersaleRefundFlow flow = loadOrCreateFlow(aftersale);
+        saveFlow(flow, FLOW_FAILED, "CHANNEL_FAILED", flow.getRetryCount(), failureReason);
+        return toResponse(aftersale);
+    }
+
+    @Transactional
+    public AftersaleResponse retryRefund(Long id) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findByIdForUpdate(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (REFUNDING.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!REFUND_FAILED.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale refund is not failed");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        aftersale.setAftersaleStatus(REFUNDING);
+        aftersale.setRejectReason(null);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+        AftersaleRefundFlow flow = loadOrCreateFlow(aftersale);
+        refundApprovedOutbox.retry(aftersale, now);
+        saveFlow(flow, FLOW_REFUNDING, STEP_EVENT_PENDING, flow.getRetryCount() + 1, null);
+        return toResponse(aftersale);
     }
 
     @Transactional
@@ -451,6 +496,11 @@ public class AftersaleService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeFailureReason(RefundFailureRequest request) {
+        String reason = request == null ? null : normalizePlainText(request.failureReason());
+        return reason == null ? "Refund channel failed" : reason;
     }
 
     private String joinImages(List<String> images) {

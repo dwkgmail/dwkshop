@@ -4,6 +4,7 @@ import com.dwkshop.backend.admin.AdminOperationLogService;
 import com.dwkshop.backend.aftersale.dto.AftersaleResponse;
 import com.dwkshop.backend.aftersale.dto.CreateAftersaleRequest;
 import com.dwkshop.backend.aftersale.dto.RejectAftersaleRequest;
+import com.dwkshop.backend.aftersale.dto.RefundFailureRequest;
 import com.dwkshop.backend.domain.entity.AftersaleOrder;
 import com.dwkshop.backend.domain.entity.ProductSku;
 import com.dwkshop.backend.domain.entity.TradeOrder;
@@ -27,7 +28,10 @@ public class AftersaleService {
 
     private static final String APPLYING = "APPLYING";
     private static final String REFUNDED = "REFUNDED";
+    private static final String REFUNDING = "REFUNDING";
+    private static final String REFUND_FAILED = "REFUND_FAILED";
     private static final String REJECTED = "REJECTED";
+    private static final List<String> ACTIVE_STATUSES = List.of(APPLYING, REFUNDING, REFUND_FAILED, REFUNDED);
 
     private final AftersaleOrderRepository aftersaleOrderRepository;
     private final TradeOrderRepository tradeOrderRepository;
@@ -59,7 +63,7 @@ public class AftersaleService {
         if (REFUNDED.equals(order.getAftersaleStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order already refunded");
         }
-        aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(order.getId(), List.of(APPLYING, REFUNDED))
+        aftersaleOrderRepository.findFirstByOrderIdAndAftersaleStatusIn(order.getId(), ACTIVE_STATUSES)
             .ifPresent(item -> {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund request already exists");
             });
@@ -119,8 +123,37 @@ public class AftersaleService {
     public AftersaleResponse approve(Long id) {
         AftersaleOrder aftersale = aftersaleOrderRepository.findById(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (REFUNDING.equals(aftersale.getAftersaleStatus()) || REFUNDED.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
         if (!APPLYING.equals(aftersale.getAftersaleStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not applying");
+        }
+        TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+
+        LocalDateTime now = LocalDateTime.now();
+        order.setAftersaleStatus(REFUNDING);
+        order.setUpdatedAt(now);
+        tradeOrderRepository.save(order);
+
+        aftersale.setAftersaleStatus(REFUNDING);
+        aftersale.setAuditTime(now);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+        operationLogService.record("AFTERSALE", "APPROVE", "AFTERSALE", id, "Aftersale approved, refunding: " + aftersale.getAftersaleNo());
+        return toResponse(aftersale, order);
+    }
+
+    @Transactional
+    public AftersaleResponse completeRefund(Long id) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (REFUNDED.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!REFUNDING.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not refunding");
         }
         TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
@@ -144,11 +177,63 @@ public class AftersaleService {
         tradeOrderRepository.save(order);
 
         aftersale.setAftersaleStatus(REFUNDED);
-        aftersale.setAuditTime(now);
         aftersale.setRefundTime(now);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
-        operationLogService.record("AFTERSALE", "APPROVE", "AFTERSALE", id, "售后通过：" + aftersale.getAftersaleNo());
+        operationLogService.record("AFTERSALE", "REFUND_COMPLETE", "AFTERSALE", id, "Aftersale refund completed: " + aftersale.getAftersaleNo());
+        return toResponse(aftersale, order);
+    }
+
+    @Transactional
+    public AftersaleResponse failRefund(Long id, RefundFailureRequest request) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (REFUND_FAILED.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!REFUNDING.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale is not refunding");
+        }
+        TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+
+        LocalDateTime now = LocalDateTime.now();
+        String failureReason = normalizeFailureReason(request);
+        aftersale.setAftersaleStatus(REFUND_FAILED);
+        aftersale.setRejectReason(failureReason);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+
+        order.setAftersaleStatus(REFUND_FAILED);
+        order.setUpdatedAt(now);
+        tradeOrderRepository.save(order);
+        operationLogService.record("AFTERSALE", "REFUND_FAIL", "AFTERSALE", id, "Aftersale refund failed: " + failureReason);
+        return toResponse(aftersale, order);
+    }
+
+    @Transactional
+    public AftersaleResponse retryRefund(Long id) {
+        AftersaleOrder aftersale = aftersaleOrderRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Aftersale not found"));
+        if (REFUNDING.equals(aftersale.getAftersaleStatus())) {
+            return toResponse(aftersale);
+        }
+        if (!REFUND_FAILED.equals(aftersale.getAftersaleStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Aftersale refund is not failed");
+        }
+        TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+
+        LocalDateTime now = LocalDateTime.now();
+        aftersale.setAftersaleStatus(REFUNDING);
+        aftersale.setRejectReason(null);
+        aftersale.setUpdatedAt(now);
+        aftersaleOrderRepository.save(aftersale);
+
+        order.setAftersaleStatus(REFUNDING);
+        order.setUpdatedAt(now);
+        tradeOrderRepository.save(order);
+        operationLogService.record("AFTERSALE", "REFUND_RETRY", "AFTERSALE", id, "Aftersale refund retry: " + aftersale.getAftersaleNo());
         return toResponse(aftersale, order);
     }
 
@@ -172,7 +257,7 @@ public class AftersaleService {
         order.setAftersaleStatus(REJECTED);
         order.setUpdatedAt(now);
         tradeOrderRepository.save(order);
-        operationLogService.record("AFTERSALE", "REJECT", "AFTERSALE", id, "售后拒绝：" + aftersale.getRejectReason());
+        operationLogService.record("AFTERSALE", "REJECT", "AFTERSALE", id, "Aftersale rejected: " + aftersale.getRejectReason());
         return toResponse(aftersale, order);
     }
 
@@ -217,5 +302,12 @@ public class AftersaleService {
 
     private int positive(Integer value) {
         return value == null ? 0 : Math.max(value, 0);
+    }
+
+    private String normalizeFailureReason(RefundFailureRequest request) {
+        if (request == null || request.failureReason() == null || request.failureReason().isBlank()) {
+            return "Refund channel failed";
+        }
+        return request.failureReason().trim();
     }
 }

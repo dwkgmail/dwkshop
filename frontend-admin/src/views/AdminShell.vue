@@ -26,8 +26,10 @@ import {
   closeAftersale,
   completeAftersaleRefund,
   confirmAftersaleReturned,
+  failAftersaleRefund,
   getAftersales,
   rejectAftersale,
+  retryAftersaleRefund,
   type Aftersale
 } from '../api/aftersales';
 import { changeAdminPassword, loginAdmin, logoutAdmin } from '../api/auth';
@@ -222,7 +224,7 @@ const dashboard = computed(() => {
     orderCount: orders.value.length,
     payAmountText: formatCents(payAmount),
     waitShip: orders.value.filter((item) => item.orderStatus === 'WAIT_SHIP').length,
-    refundApplying: aftersales.value.filter((item) => ['APPLYING', 'WAIT_RETURN', 'REFUNDING'].includes(item.aftersaleStatus)).length,
+    refundApplying: aftersales.value.filter((item) => ['APPLYING', 'WAIT_RETURN', 'REFUNDING', 'REFUND_FAILED'].includes(item.aftersaleStatus)).length,
     couponEnabled: coupons.value.filter((item) => item.couponStatus === 'ENABLED').length,
     activeMembers: members.value.filter((item) => item.status === 'ACTIVE').length
   };
@@ -647,6 +649,23 @@ async function completeRefund(id: number) {
   });
 }
 
+async function failRefund(id: number) {
+  const failureReason = window.prompt('请输入退款失败原因', '支付渠道退款失败，等待重试或人工处理')?.trim() || '支付渠道退款失败';
+  await runTask(async () => {
+    await failAftersaleRefund(id, failureReason);
+    await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly(), loadLogsQuietly().catch(() => undefined)]);
+    showToast('退款已标记失败');
+  });
+}
+
+async function retryRefund(id: number) {
+  await runTask(async () => {
+    await retryAftersaleRefund(id);
+    await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly(), loadLogsQuietly().catch(() => undefined)]);
+    showToast('退款已重新发起');
+  });
+}
+
 async function closeRefund(id: number) {
   await runTask(async () => {
     await closeAftersale(id);
@@ -770,6 +789,7 @@ function statusText(status: string) {
     WAIT_RETURN: '待退货',
     RETURNED: '已退货',
     REFUNDING: '退款中',
+    REFUND_FAILED: '退款失败',
     REJECTED: '已拒绝',
     CLOSED: '已关闭',
     FULL_REDUCTION: '满减券'
@@ -986,6 +1006,7 @@ onUnmounted(() => {
             <option value="APPLYING">待审核</option>
             <option value="WAIT_RETURN">待退货</option>
             <option value="REFUNDING">退款中</option>
+            <option value="REFUND_FAILED">退款失败</option>
             <option value="REFUNDED">已退款</option>
             <option value="REJECTED">已拒绝</option>
             <option value="CLOSED">已关闭</option>
@@ -1010,6 +1031,8 @@ onUnmounted(() => {
                   <button v-if="item.aftersaleStatus === 'APPLYING'" type="button" @click="rejectRefund(item.id)">拒绝</button>
                   <button v-if="item.aftersaleStatus === 'WAIT_RETURN'" type="button" @click="confirmReturned(item.id)">确认退货</button>
                   <button v-if="item.aftersaleStatus === 'REFUNDING'" type="button" @click="completeRefund(item.id)">完成退款</button>
+                  <button v-if="item.aftersaleStatus === 'REFUNDING'" type="button" @click="failRefund(item.id)">标记失败</button>
+                  <button v-if="item.aftersaleStatus === 'REFUND_FAILED'" type="button" @click="retryRefund(item.id)">重试退款</button>
                   <button v-if="item.aftersaleStatus === 'REJECTED' || item.aftersaleStatus === 'CANCELED'" type="button" @click="closeRefund(item.id)">关闭</button>
                   <button type="button" @click="openOrderDetail(item.orderId)">订单</button>
                 </td>

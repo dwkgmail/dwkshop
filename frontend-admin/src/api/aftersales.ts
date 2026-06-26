@@ -53,6 +53,19 @@ export function completeAftersaleRefund(id: number) {
   });
 }
 
+export function failAftersaleRefund(id: number, failureReason: string) {
+  return request<Aftersale>(`/admin/aftersales/${id}/refund/fail`, {
+    method: 'POST',
+    body: JSON.stringify({ failureReason })
+  });
+}
+
+export function retryAftersaleRefund(id: number) {
+  return request<Aftersale>(`/admin/aftersales/${id}/refund/retry`, {
+    method: 'POST'
+  });
+}
+
 export function closeAftersale(id: number) {
   return request<Aftersale>(`/admin/aftersales/${id}/close`, {
     method: 'POST'

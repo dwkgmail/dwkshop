@@ -394,7 +394,10 @@ SKU 库存为 `0` 或 SKU 禁用时，接口返回 `selectable=false`。
 - `POST /api/aftersales`：提交退款售后申请
 - `GET /api/aftersales`：用户售后列表
 - `GET /admin/aftersales`：后台售后列表
-- `POST /admin/aftersales/{id}/approve`：审核通过并完成退款
+- `POST /admin/aftersales/{id}/approve`：审核通过并进入退款中
+- `POST /admin/aftersales/{id}/refund/complete`：支付渠道确认退款成功
+- `POST /admin/aftersales/{id}/refund/fail`：记录支付渠道退款失败
+- `POST /admin/aftersales/{id}/refund/retry`：重试失败退款
 - `POST /admin/aftersales/{id}/reject`：拒绝退款申请
 
 购物车结算确认示例：

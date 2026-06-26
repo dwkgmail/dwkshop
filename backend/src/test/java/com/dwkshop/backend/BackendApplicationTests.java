@@ -445,7 +445,37 @@ class BackendApplicationTests {
         mockMvc.perform(post("/admin/aftersales/{id}/approve", aftersaleId)
                 .header("Authorization", "Bearer " + adminToken()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"))
+            .andExpect(jsonPath("$.refundTime").doesNotExist());
+
+        mockMvc.perform(get("/api/orders/{id}", orderId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"))
+            .andExpect(jsonPath("$.payStatus").value("PAID"))
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
+        assertThat(jdbcTemplate.queryForObject("select stock from product_sku where id = 1", Integer.class)).isEqualTo(118);
+        assertThat(jdbcTemplate.queryForObject("select locked_stock from product_sku where id = 1", Integer.class)).isEqualTo(2);
+
+        mockMvc.perform(post("/admin/aftersales/{id}/refund/fail", aftersaleId)
+                .header("Authorization", "Bearer " + adminToken())
+                .contentType("application/json")
+                .content("""
+                    {"failureReason":"Payment channel timeout"}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUND_FAILED"))
+            .andExpect(jsonPath("$.rejectReason").value("Payment channel timeout"));
+
+        mockMvc.perform(post("/admin/aftersales/{id}/refund/retry", aftersaleId)
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
+
+        mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", aftersaleId)
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
+            .andExpect(jsonPath("$.refundTime").isNotEmpty());
 
         mockMvc.perform(get("/api/orders/{id}", orderId))
             .andExpect(status().isOk())

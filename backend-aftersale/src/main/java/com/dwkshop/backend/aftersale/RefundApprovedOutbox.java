@@ -48,6 +48,17 @@ public class RefundApprovedOutbox {
         repository.save(outbox);
     }
 
+    public void retry(AftersaleOrder aftersale, LocalDateTime retryAt) {
+        repository.findByAggregateIdAndEventType(aftersale.getId(), EVENT_TYPE)
+            .ifPresent(outbox -> {
+                outbox.setPublishStatus("PENDING");
+                outbox.setNextRetryAt(retryAt);
+                outbox.setLastError(null);
+                outbox.setUpdatedAt(retryAt);
+                repository.save(outbox);
+            });
+    }
+
     private String write(RefundApprovedEvent event) {
         try {
             return objectMapper.writeValueAsString(event);

@@ -128,6 +128,35 @@ class AftersaleServiceIntegrationTest {
         assertThat(flow.getCurrentStep()).isEqualTo("EVENT_PENDING");
         assertThat(flow.getRetryCount()).isEqualTo(0);
 
+        mockMvc.perform(post("/admin/aftersales/{id}/refund/fail", created.getId())
+                .header("Authorization", "Bearer " + adminToken())
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "failureReason": "Payment channel timeout"
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUND_FAILED"))
+            .andExpect(jsonPath("$.rejectReason").value("Payment channel timeout"));
+
+        flow = refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow();
+        assertThat(flow.getFlowStatus()).isEqualTo("FAILED");
+        assertThat(flow.getCurrentStep()).isEqualTo("CHANNEL_FAILED");
+        assertThat(flow.getLastError()).isEqualTo("Payment channel timeout");
+
+        mockMvc.perform(post("/admin/aftersales/{id}/refund/retry", created.getId())
+                .header("Authorization", "Bearer " + adminToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"))
+            .andExpect(jsonPath("$.rejectReason").doesNotExist());
+
+        assertThat(outboxEventRepository.findAll()).hasSize(1);
+        flow = refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow();
+        assertThat(flow.getFlowStatus()).isEqualTo("REFUNDING");
+        assertThat(flow.getCurrentStep()).isEqualTo("EVENT_PENDING");
+        assertThat(flow.getRetryCount()).isEqualTo(1);
+
         mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", created.getId())
                 .header("Authorization", "Bearer " + adminToken()))
             .andExpect(status().isOk())

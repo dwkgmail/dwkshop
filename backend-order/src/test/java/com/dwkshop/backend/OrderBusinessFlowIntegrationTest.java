@@ -528,11 +528,15 @@ class OrderBusinessFlowIntegrationTest {
         item.setTotalAmount(payAmount);
         item.setDiscountAmount(0);
         item.setPayAmount(payAmount);
+        item.setCouponShareAmount(0);
+        item.setPointShareAmount(0);
+        item.setFreightShareAmount(0);
         item.setSupportRefund(true);
         item.setAftersaleQuantity(0);
         item.setRefundableQuantity(1);
         item.setRefundedQuantity(0);
         item.setRefundAmount(0);
+        item.setRefundableAmount(payAmount);
         item.setRefundStatus("NONE");
         item.setCreatedAt(now);
         tradeOrderItemRepository.save(item);

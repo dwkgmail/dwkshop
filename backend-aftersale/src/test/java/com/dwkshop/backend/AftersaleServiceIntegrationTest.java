@@ -87,7 +87,7 @@ class AftersaleServiceIntegrationTest {
                 "APPLYING",
                 19900,
                 true,
-                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(501L, 101L, 2, 2, 0, 0, 19900, 0, "NONE", true))
+                List.of(refundItem(501L, 101L, 2, 2, 0, 0, 19900, 0, 19900))
             )
         );
         when(orderClient.completeAftersale(100L)).thenReturn(
@@ -155,7 +155,7 @@ class AftersaleServiceIntegrationTest {
                 "APPLYING",
                 9900,
                 true,
-                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(502L, 102L, 1, 1, 0, 0, 9900, 0, "NONE", true))
+                List.of(refundItem(502L, 102L, 1, 1, 0, 0, 9900, 0, 9900))
             )
         );
         when(orderClient.getAftersaleSnapshot(102L)).thenReturn(
@@ -207,7 +207,7 @@ class AftersaleServiceIntegrationTest {
                 "APPLYING",
                 25900,
                 true,
-                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(504L, 103L, 1, 1, 0, 0, 25900, 0, "NONE", true))
+                List.of(refundItem(504L, 103L, 1, 1, 0, 0, 25900, 0, 25900))
             )
         );
         when(orderClient.completeAftersale(103L)).thenReturn(
@@ -267,7 +267,7 @@ class AftersaleServiceIntegrationTest {
                 "APPLYING",
                 15900,
                 true,
-                List.of(new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(503L, 101L, 1, 1, 0, 0, 15900, 0, "NONE", true))
+                List.of(refundItem(503L, 101L, 1, 1, 0, 0, 15900, 0, 15900))
             )
         );
         when(orderClient.rejectAftersale(101L)).thenReturn(
@@ -310,7 +310,88 @@ class AftersaleServiceIntegrationTest {
         assertThat(flow.getCurrentStep()).isEqualTo("DONE");
     }
 
+    @Test
+    void createPartialRefundUsesItemSnapshotAndDoesNotAlwaysRefundOrderPayAmount() throws Exception {
+        when(orderClient.applyAftersale(104L, 1L)).thenReturn(
+            new AftersaleOrderSnapshot(104L, "SO202606180104", 1L, "13800000004", "WAIT_SHIP", "PAID", "NONE", 28200, true)
+        );
+        when(orderClient.getRefundContext(104L)).thenReturn(
+            new RefundOrderContext(
+                104L,
+                "SO202606180104",
+                1L,
+                "WAIT_SHIP",
+                "PAID",
+                "UNSHIPPED",
+                "NONE",
+                28200,
+                true,
+                List.of(
+                    new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(
+                        505L, 104L, 2, 2, 0, 0,
+                        12000, 12000, 1500, 500, 200,
+                        0, 0, 12200, "NONE", true
+                    ),
+                    new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(
+                        506L, 105L, 1, 1, 0, 0,
+                        16000, 16000, 2000, 800, 300,
+                        0, 0, 16300, "NONE", true
+                    )
+                )
+            )
+        );
+
+        mockMvc.perform(post("/api/aftersales")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": 104,
+                      "reason": "Only one item",
+                      "refundItems": [
+                        { "skuId": 505, "quantity": 1 }
+                      ]
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.refundAmount").value(6000))
+            .andExpect(jsonPath("$.refundItems[0].refundAmount").value(6000));
+
+        AftersaleOrder created = aftersaleOrderRepository.findAll().get(0);
+        assertThat(created.getRefundAmount()).isEqualTo(6000);
+    }
+
     private String adminToken() {
         return authTokenService.issue(1L, "admin", "ADMIN");
+    }
+
+    private com.dwkshop.backend.aftersale.RefundOrderItemSnapshot refundItem(
+        Long skuId,
+        Long productId,
+        int quantity,
+        int refundableQuantity,
+        int refundedQuantity,
+        int aftersaleQuantity,
+        int payAmount,
+        int refundAmount,
+        int refundableAmount
+    ) {
+        return new com.dwkshop.backend.aftersale.RefundOrderItemSnapshot(
+            skuId,
+            productId,
+            quantity,
+            refundableQuantity,
+            refundedQuantity,
+            aftersaleQuantity,
+            payAmount,
+            payAmount,
+            0,
+            0,
+            0,
+            refundAmount,
+            refundAmount,
+            refundableAmount,
+            refundAmount > 0 ? "PARTIAL_REFUNDED" : "NONE",
+            true
+        );
     }
 }

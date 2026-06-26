@@ -95,6 +95,8 @@ class OrderInternalApiIntegrationTest {
             .andExpect(jsonPath("$.refundable").value(true))
             .andExpect(jsonPath("$.items.length()").value(1))
             .andExpect(jsonPath("$.items[0].skuId").value(501))
+            .andExpect(jsonPath("$.items[0].itemPayAmount").value(19900))
+            .andExpect(jsonPath("$.items[0].refundableAmount").value(19900))
             .andExpect(jsonPath("$.items[0].supportRefund").value(true));
 
         mockMvc.perform(get("/internal/orders/inventory-reconciliation/summaries")
@@ -195,11 +197,15 @@ class OrderInternalApiIntegrationTest {
         item.setTotalAmount(payAmount);
         item.setDiscountAmount(0);
         item.setPayAmount(payAmount);
+        item.setCouponShareAmount(0);
+        item.setPointShareAmount(0);
+        item.setFreightShareAmount(0);
         item.setSupportRefund(supportRefund);
         item.setAftersaleQuantity(0);
         item.setRefundableQuantity(quantity);
         item.setRefundedQuantity(0);
         item.setRefundAmount(0);
+        item.setRefundableAmount(payAmount);
         item.setRefundStatus("NONE");
         item.setCreatedAt(now);
         tradeOrderItemRepository.save(item);

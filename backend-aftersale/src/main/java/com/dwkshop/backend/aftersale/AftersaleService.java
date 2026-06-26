@@ -363,8 +363,6 @@ public class AftersaleService {
             : request.refundItems().stream()
                 .map(item -> new RequestedRefundItem(item.skuId(), item.quantity()))
                 .toList();
-        int grossPayAmount = sourceItems.stream().mapToInt(item -> positive(item.payAmount())).sum();
-        int orderPayAmount = positive(context.payAmount());
         return requestedItems.stream().map(requested -> {
             RefundOrderItemSnapshot source = sourceItems.stream()
                 .filter(item -> item.skuId().equals(requested.skuId()))
@@ -378,10 +376,25 @@ public class AftersaleService {
             if (quantity <= 0 || quantity > refundableQuantity) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund quantity exceeds refundable quantity");
             }
-            int itemGrossAmount = positive(source.payAmount()) * quantity / Math.max(positive(source.quantity()), 1);
-            int refundAmount = grossPayAmount <= 0 ? 0 : itemGrossAmount * orderPayAmount / grossPayAmount;
+            int refundAmount = calculateRefundAmount(source, quantity, Boolean.TRUE.equals(request.includeFreight()));
             return new ResolvedRefundItem(source.productId(), source.skuId(), quantity, refundAmount);
         }).toList();
+    }
+
+    private int calculateRefundAmount(RefundOrderItemSnapshot source, int quantity, boolean includeFreight) {
+        int refundableQuantity = positive(source.refundableQuantity());
+        int itemPayAmount = positive(source.itemPayAmount() == null ? source.payAmount() : source.itemPayAmount());
+        int freightShareAmount = positive(source.freightShareAmount());
+        int refundedAmount = positive(source.refundedAmount() == null ? source.refundAmount() : source.refundedAmount());
+        int remainingItemPayAmount = Math.max(itemPayAmount - Math.min(refundedAmount, itemPayAmount), 0);
+        int refundedFreightAmount = Math.max(refundedAmount - itemPayAmount, 0);
+        int remainingFreightAmount = includeFreight ? Math.max(freightShareAmount - refundedFreightAmount, 0) : 0;
+        int requestedAmount = (remainingItemPayAmount + remainingFreightAmount) * quantity / Math.max(refundableQuantity, 1);
+        int maxRefundableAmount = positive(source.refundableAmount());
+        if (maxRefundableAmount <= 0) {
+            maxRefundableAmount = Math.max(itemPayAmount + freightShareAmount - refundedAmount, 0);
+        }
+        return Math.min(requestedAmount, maxRefundableAmount);
     }
 
     private String refundScope(CreateAftersaleRequest request, List<ResolvedRefundItem> refundItems, RefundOrderContext context) {

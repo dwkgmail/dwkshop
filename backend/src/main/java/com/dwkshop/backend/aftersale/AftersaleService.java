@@ -67,6 +67,12 @@ public class AftersaleService {
         if (items.isEmpty() || items.stream().anyMatch(item -> !Boolean.TRUE.equals(item.getSupportRefund()))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order does not support refund");
         }
+        int refundAmount = items.stream()
+            .mapToInt(item -> positive(item.getRefundableAmount()))
+            .sum();
+        if (refundAmount <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Order has no refundable amount");
+        }
 
         LocalDateTime now = LocalDateTime.now();
         AftersaleOrder aftersale = new AftersaleOrder();
@@ -75,7 +81,7 @@ public class AftersaleService {
         aftersale.setUserId(userId);
         aftersale.setAftersaleType("REFUND");
         aftersale.setAftersaleStatus(APPLYING);
-        aftersale.setRefundAmount(order.getPayAmount());
+        aftersale.setRefundAmount(refundAmount);
         aftersale.setReason(request.reason().trim());
         aftersale.setApplyTime(now);
         aftersale.setCreatedAt(now);
@@ -124,6 +130,11 @@ public class AftersaleService {
         List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(order.getId());
         for (TradeOrderItem item : items) {
             item.setAftersaleQuantity(item.getQuantity());
+            item.setRefundedQuantity(item.getQuantity());
+            item.setRefundableQuantity(0);
+            item.setRefundAmount(item.getRefundAmount() + positive(item.getRefundableAmount()));
+            item.setRefundableAmount(0);
+            item.setRefundStatus("REFUNDED");
             tradeOrderItemRepository.save(item);
         }
 
@@ -202,5 +213,9 @@ public class AftersaleService {
             aftersale.getAuditTime(),
             aftersale.getRefundTime()
         );
+    }
+
+    private int positive(Integer value) {
+        return value == null ? 0 : Math.max(value, 0);
     }
 }

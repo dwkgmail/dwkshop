@@ -56,6 +56,15 @@ public class TradeOrderItem {
     private Integer payAmount;
 
     @Column(nullable = false)
+    private Integer couponShareAmount;
+
+    @Column(nullable = false)
+    private Integer pointShareAmount;
+
+    @Column(nullable = false)
+    private Integer freightShareAmount;
+
+    @Column(nullable = false)
     private Boolean supportRefund;
 
     @Column(nullable = false)
@@ -69,6 +78,9 @@ public class TradeOrderItem {
 
     @Column(nullable = false)
     private Integer refundAmount;
+
+    @Column(nullable = false)
+    private Integer refundableAmount;
 
     @Column(nullable = false, length = 30)
     private String refundStatus;

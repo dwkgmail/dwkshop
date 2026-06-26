@@ -473,7 +473,13 @@ public class OrderService {
                     item.getRefundedQuantity(),
                     item.getAftersaleQuantity(),
                     item.getPayAmount(),
+                    item.getPayAmount(),
+                    item.getCouponShareAmount(),
+                    item.getPointShareAmount(),
+                    item.getFreightShareAmount(),
                     item.getRefundAmount(),
+                    item.getRefundAmount(),
+                    item.getRefundableAmount(),
                     item.getRefundStatus(),
                     item.getSupportRefund()
                 ))
@@ -514,7 +520,7 @@ public class OrderService {
         }
         List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(orderId);
         for (TradeOrderItem item : items) {
-            applyRefund(item, item.getRefundableQuantity(), item.getPayAmount() - item.getRefundAmount());
+            applyRefund(item, item.getRefundableQuantity(), item.getRefundableAmount());
         }
         tradeOrderItemRepository.saveAll(items);
         OrderStateMachine.completeAftersale(order, LocalDateTime.now());
@@ -535,7 +541,7 @@ public class OrderService {
         List<RefundApprovedEvent.RefundItem> refundItems = event.items() == null ? List.of() : event.items();
         if (refundItems.isEmpty()) {
             for (TradeOrderItem item : items) {
-                applyRefund(item, item.getRefundableQuantity(), item.getPayAmount() - item.getRefundAmount());
+                applyRefund(item, item.getRefundableQuantity(), item.getRefundableAmount());
             }
         } else {
             for (RefundApprovedEvent.RefundItem refundItem : refundItems) {
@@ -696,7 +702,10 @@ public class OrderService {
         TradeOrder savedOrder = tradeOrderRepository.save(order);
 
         List<TradeOrderItem> savedItems = new java.util.ArrayList<>();
-        for (SettlementItem item : calculation.items()) {
+        List<ItemRefundSnapshot> refundSnapshots = buildRefundSnapshots(calculation);
+        for (int index = 0; index < calculation.items().size(); index++) {
+            SettlementItem item = calculation.items().get(index);
+            ItemRefundSnapshot refundSnapshot = refundSnapshots.get(index);
             TradeOrderItem orderItem = new TradeOrderItem();
             orderItem.setOrderId(savedOrder.getId());
             orderItem.setProductId(item.sku().productId());
@@ -708,12 +717,16 @@ public class OrderService {
             orderItem.setQuantity(item.quantity());
             orderItem.setTotalAmount(item.totalAmount());
             orderItem.setDiscountAmount(0);
-            orderItem.setPayAmount(item.totalAmount());
+            orderItem.setPayAmount(refundSnapshot.itemPayAmount());
+            orderItem.setCouponShareAmount(refundSnapshot.couponShareAmount());
+            orderItem.setPointShareAmount(refundSnapshot.pointShareAmount());
+            orderItem.setFreightShareAmount(refundSnapshot.freightShareAmount());
             orderItem.setSupportRefund(true);
             orderItem.setAftersaleQuantity(0);
             orderItem.setRefundableQuantity(item.quantity());
             orderItem.setRefundedQuantity(0);
             orderItem.setRefundAmount(0);
+            orderItem.setRefundableAmount(refundSnapshot.refundableAmount());
             orderItem.setRefundStatus("NONE");
             orderItem.setCreatedAt(now);
             savedItems.add(tradeOrderItemRepository.save(orderItem));
@@ -980,11 +993,63 @@ public class OrderService {
         if (refundQuantity <= 0 || refundQuantity > availableQuantity) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "退款数量超过可退数量");
         }
+        int actualRefundAmount = refundAmount == null ? 0 : Math.max(refundAmount, 0);
+        if (actualRefundAmount > positive(item.getRefundableAmount())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refund amount exceeds refundable amount");
+        }
         item.setAftersaleQuantity(item.getAftersaleQuantity() + refundQuantity);
         item.setRefundedQuantity(item.getRefundedQuantity() + refundQuantity);
         item.setRefundableQuantity(Math.max(item.getQuantity() - item.getRefundedQuantity(), 0));
-        item.setRefundAmount(item.getRefundAmount() + (refundAmount == null ? 0 : Math.max(refundAmount, 0)));
+        item.setRefundAmount(item.getRefundAmount() + actualRefundAmount);
+        item.setRefundableAmount(Math.max(positive(item.getRefundableAmount()) - actualRefundAmount, 0));
         item.setRefundStatus(item.getRefundedQuantity() >= item.getQuantity() ? "REFUNDED" : "PARTIAL_REFUNDED");
+    }
+
+    private List<ItemRefundSnapshot> buildRefundSnapshots(SettlementCalculation calculation) {
+        List<SettlementItem> items = calculation.items();
+        List<Integer> couponShares = allocateByProductAmount(items, calculation.amount().couponDiscountAmount());
+        List<Integer> pointShares = allocateByProductAmount(items, calculation.amount().pointDiscountAmount());
+        List<Integer> freightShares = allocateByProductAmount(items, calculation.amount().freightAmount() - calculation.amount().freightDiscountAmount());
+        List<ItemRefundSnapshot> snapshots = new java.util.ArrayList<>();
+        for (int index = 0; index < items.size(); index++) {
+            int itemPayAmount = Math.max(items.get(index).totalAmount() - couponShares.get(index) - pointShares.get(index), 0);
+            int freightShareAmount = Math.max(freightShares.get(index), 0);
+            snapshots.add(new ItemRefundSnapshot(
+                itemPayAmount,
+                couponShares.get(index),
+                pointShares.get(index),
+                freightShareAmount,
+                itemPayAmount + freightShareAmount
+            ));
+        }
+        return snapshots;
+    }
+
+    private List<Integer> allocateByProductAmount(List<SettlementItem> items, int amount) {
+        if (items.isEmpty()) {
+            return List.of();
+        }
+        int normalizedAmount = Math.max(amount, 0);
+        int productAmount = items.stream().mapToInt(SettlementItem::totalAmount).sum();
+        List<Integer> shares = new java.util.ArrayList<>();
+        int allocated = 0;
+        for (int index = 0; index < items.size(); index++) {
+            int share;
+            if (index == items.size() - 1) {
+                share = normalizedAmount - allocated;
+            } else if (productAmount <= 0) {
+                share = 0;
+            } else {
+                share = normalizedAmount * items.get(index).totalAmount() / productAmount;
+                allocated += share;
+            }
+            shares.add(Math.max(share, 0));
+        }
+        return shares;
+    }
+
+    private int positive(Integer value) {
+        return value == null ? 0 : Math.max(value, 0);
     }
 
     private OrderAddressResponse toAddress(MemberAddress address) {
@@ -1096,6 +1161,15 @@ public class OrderService {
     }
 
     private record PointSelection(boolean visible, int availablePoints, int deductionAmount, boolean selected) {
+    }
+
+    private record ItemRefundSnapshot(
+        int itemPayAmount,
+        int couponShareAmount,
+        int pointShareAmount,
+        int freightShareAmount,
+        int refundableAmount
+    ) {
     }
 
     private record OrderTransition(OrderResponse response, Long couponUserId, int pointAmount, boolean expired) {

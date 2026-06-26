@@ -432,7 +432,10 @@ public class OrderService {
         order.setUpdatedAt(now);
         TradeOrder savedOrder = tradeOrderRepository.save(order);
 
-        for (SettlementItem item : calculation.items()) {
+        List<ItemRefundSnapshot> refundSnapshots = buildRefundSnapshots(calculation);
+        for (int index = 0; index < calculation.items().size(); index++) {
+            SettlementItem item = calculation.items().get(index);
+            ItemRefundSnapshot refundSnapshot = refundSnapshots.get(index);
             // 通过行级锁再次扣减库存并增加锁定库存，避免并发下单超卖。
             ProductSku sku = productSkuRepository.findByIdForUpdate(item.sku().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格已失效"));
@@ -458,9 +461,17 @@ public class OrderService {
             orderItem.setQuantity(item.quantity());
             orderItem.setTotalAmount(item.totalAmount());
             orderItem.setDiscountAmount(0);
-            orderItem.setPayAmount(item.totalAmount());
+            orderItem.setPayAmount(refundSnapshot.itemPayAmount());
+            orderItem.setCouponShareAmount(refundSnapshot.couponShareAmount());
+            orderItem.setPointShareAmount(refundSnapshot.pointShareAmount());
+            orderItem.setFreightShareAmount(refundSnapshot.freightShareAmount());
             orderItem.setSupportRefund(true);
             orderItem.setAftersaleQuantity(0);
+            orderItem.setRefundableQuantity(item.quantity());
+            orderItem.setRefundedQuantity(0);
+            orderItem.setRefundAmount(0);
+            orderItem.setRefundableAmount(refundSnapshot.refundableAmount());
+            orderItem.setRefundStatus("NONE");
             orderItem.setCreatedAt(now);
             tradeOrderItemRepository.save(orderItem);
         }
@@ -513,6 +524,49 @@ public class OrderService {
             return null;
         }
         return trimmed.length() > 64 ? trimmed.substring(0, 64) : trimmed;
+    }
+
+    private List<ItemRefundSnapshot> buildRefundSnapshots(SettlementCalculation calculation) {
+        List<SettlementItem> items = calculation.items();
+        List<Integer> couponShares = allocateByProductAmount(items, calculation.amount().couponDiscountAmount());
+        List<Integer> pointShares = allocateByProductAmount(items, calculation.amount().pointDiscountAmount());
+        List<Integer> freightShares = allocateByProductAmount(items, calculation.amount().freightAmount() - calculation.amount().freightDiscountAmount());
+        List<ItemRefundSnapshot> snapshots = new java.util.ArrayList<>();
+        for (int index = 0; index < items.size(); index++) {
+            int itemPayAmount = Math.max(items.get(index).totalAmount() - couponShares.get(index) - pointShares.get(index), 0);
+            int freightShareAmount = Math.max(freightShares.get(index), 0);
+            snapshots.add(new ItemRefundSnapshot(
+                itemPayAmount,
+                couponShares.get(index),
+                pointShares.get(index),
+                freightShareAmount,
+                itemPayAmount + freightShareAmount
+            ));
+        }
+        return snapshots;
+    }
+
+    private List<Integer> allocateByProductAmount(List<SettlementItem> items, int amount) {
+        if (items.isEmpty()) {
+            return List.of();
+        }
+        int normalizedAmount = Math.max(amount, 0);
+        int productAmount = items.stream().mapToInt(SettlementItem::totalAmount).sum();
+        List<Integer> shares = new java.util.ArrayList<>();
+        int allocated = 0;
+        for (int index = 0; index < items.size(); index++) {
+            int share;
+            if (index == items.size() - 1) {
+                share = normalizedAmount - allocated;
+            } else if (productAmount <= 0) {
+                share = 0;
+            } else {
+                share = normalizedAmount * items.get(index).totalAmount() / productAmount;
+                allocated += share;
+            }
+            shares.add(Math.max(share, 0));
+        }
+        return shares;
     }
 
     private ConfirmOrderResponse toConfirmResponse(String token, SettlementCalculation calculation, String remark) {
@@ -717,6 +771,15 @@ public class OrderService {
     }
 
     private record PointSelection(boolean visible, int availablePoints, int deductionAmount, boolean selected) {
+    }
+
+    private record ItemRefundSnapshot(
+        int itemPayAmount,
+        int couponShareAmount,
+        int pointShareAmount,
+        int freightShareAmount,
+        int refundableAmount
+    ) {
     }
 
 }

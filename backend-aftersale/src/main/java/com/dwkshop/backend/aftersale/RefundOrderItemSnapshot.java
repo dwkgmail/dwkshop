@@ -8,7 +8,13 @@ public record RefundOrderItemSnapshot(
     Integer refundedQuantity,
     Integer aftersaleQuantity,
     Integer payAmount,
+    Integer itemPayAmount,
+    Integer couponShareAmount,
+    Integer pointShareAmount,
+    Integer freightShareAmount,
     Integer refundAmount,
+    Integer refundedAmount,
+    Integer refundableAmount,
     String refundStatus,
     Boolean supportRefund
 ) {

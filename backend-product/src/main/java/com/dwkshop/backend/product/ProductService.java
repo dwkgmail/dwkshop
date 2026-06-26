@@ -247,6 +247,17 @@ public class ProductService {
         return changeSaleStatus(id, OFF_SALE);
     }
 
+    @Transactional
+    public void deleteProduct(Long id) {
+        Product product = productRepository.findById(id)
+            .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Product does not exist"));
+        product.setDeletedFlag(true);
+        product.setSaleStatus(OFF_SALE);
+        product.setUpdatedAt(LocalDateTime.now());
+        productSearchGateway.indexProduct(productRepository.save(product));
+    }
+
     private ProductDetailResponse changeSaleStatus(Long id, String saleStatus) {
         Product product = productRepository.findById(id)
             .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))

@@ -381,6 +381,8 @@ SKU 库存为 `0` 或 SKU 禁用时，接口返回 `selectable=false`。
 - `items[].status`：`NORMAL`、`OFF_SALE`、`SKU_INVALID`、`STOCK_NOT_ENOUGH`、`NOT_ALLOW_CART`
 - `items[].canCheck`：是否允许勾选
 
+查询购物车会根据商品实时快照同步购物车项状态。商品下架、软删除、SKU 禁用或库存不足时，购物车项会标记为失效并自动取消勾选。
+
 购物车金额只做预估，最终金额以确认订单接口为准。
 
 ### 订单接口
@@ -434,6 +436,13 @@ SKU 库存为 `0` 或 SKU 禁用时，接口返回 `selectable=false`。
 
 确认订单会返回地址、商品、运费、优惠券、金额明细、购买须知和 `settlementToken`。同一个 `settlementToken` 只能成功创建一个订单。普通运费当前为 `0`，冷链运费当前为 `1000` 分。
 
+上下架与订单规则：
+
+- 确认订单前校验商品必须 `ON_SALE`，SKU 必须 `ENABLED`，库存必须充足。
+- 订单创建后锁定商品快照和金额。待支付订单允许继续支付，不再受商品后续下架影响。
+- 已支付订单不受商品下架或后台软删除影响。
+- 售后读取订单商品快照，不依赖商品当前上下架状态。
+
 ### 管理后台商品接口
 
 - `GET /admin/products`：后台商品列表
@@ -441,6 +450,7 @@ SKU 库存为 `0` 或 SKU 禁用时，接口返回 `selectable=false`。
 - `PUT /admin/products/{id}`：编辑商品
 - `POST /admin/products/{id}/on-sale`：上架商品
 - `POST /admin/products/{id}/off-sale`：下架商品
+- `DELETE /admin/products/{id}`：软删除商品，置为下架并隐藏前台展示，不物理删除历史数据
 
 ## 相关文档
 

@@ -271,6 +271,41 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     @Test
+    void unpaidOrderCanStillBePaidWhenProductGoesOffSaleAfterOrderCreation() throws Exception {
+        when(productCatalogClient.getSkuSnapshot(507L)).thenReturn(sku(507L, 5, 1000, true));
+        String token = confirmToken("""
+            {
+              "sourceType": "BUY_NOW",
+              "skuId": 507,
+              "quantity": 1,
+              "addressId": 10
+            }
+            """);
+
+        mockMvc.perform(post("/api/orders/create")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "settlementToken": "%s",
+                      "expectedPayAmount": 1000
+                    }
+                    """.formatted(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.payStatus").value("UNPAID"));
+
+        TradeOrder order = tradeOrderRepository.findAll().get(0);
+        when(productCatalogClient.getSkuSnapshot(507L)).thenReturn(sku(507L, 5, 1000, true, "OFF_SALE", "ENABLED"));
+
+        mockMvc.perform(post("/api/orders/{orderId}/pay", order.getId()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.payStatus").value("PAID"))
+            .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"));
+
+        TradeOrder paidOrder = tradeOrderRepository.findById(order.getId()).orElseThrow();
+        assertThat(paidOrder.getPayStatus()).isEqualTo("PAID");
+    }
+
+    @Test
     void pointDeductionIsPersistedAndRefundApprovalCompensatesOrderState() throws Exception {
         when(productCatalogClient.getSkuSnapshot(503L)).thenReturn(sku(503L, 5, 1500, true));
         when(memberClient.getPointAccount(1L)).thenReturn(new MemberPointAccount(1L, 50000));
@@ -495,9 +530,13 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     private ProductSkuSnapshot sku(Long skuId, int stock, int salePrice, boolean supportPointDeduction) {
-        return new ProductSkuSnapshot(101L, skuId, 1L, "Test Product", "Test Brand", "/images/product.png", "ON_SALE",
+        return sku(skuId, stock, salePrice, supportPointDeduction, "ON_SALE", "ENABLED");
+    }
+
+    private ProductSkuSnapshot sku(Long skuId, int stock, int salePrice, boolean supportPointDeduction, String saleStatus, String skuStatus) {
+        return new ProductSkuSnapshot(101L, skuId, 1L, "Test Product", "Test Brand", "/images/product.png", saleStatus,
             "NORMAL", false, true, true, supportPointDeduction, true, 1, "Notice", "Notice content",
-            "Default", "{}", salePrice, stock, "ENABLED");
+            "Default", "{}", salePrice, stock, skuStatus);
     }
 
     private MemberAddress address() {

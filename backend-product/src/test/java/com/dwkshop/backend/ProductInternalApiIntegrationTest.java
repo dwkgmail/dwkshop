@@ -9,6 +9,7 @@ import com.dwkshop.backend.domain.repository.ProductRefundCommandRepository;
 import com.dwkshop.backend.domain.repository.ProductRepository;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.auth.InternalServiceAuthConfig;
+import com.dwkshop.backend.product.ProductService;
 import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,7 +24,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -42,6 +45,7 @@ class ProductInternalApiIntegrationTest {
     private final ProductSkuRepository productSkuRepository;
     private final ProductNoticeRepository productNoticeRepository;
     private final ProductRefundCommandRepository productRefundCommandRepository;
+    private final ProductService productService;
 
     @MockBean
     private ProductSearchGateway productSearchGateway;
@@ -52,13 +56,15 @@ class ProductInternalApiIntegrationTest {
         ProductRepository productRepository,
         ProductSkuRepository productSkuRepository,
         ProductNoticeRepository productNoticeRepository,
-        ProductRefundCommandRepository productRefundCommandRepository
+        ProductRefundCommandRepository productRefundCommandRepository,
+        ProductService productService
     ) {
         this.mockMvc = mockMvc;
         this.productRepository = productRepository;
         this.productSkuRepository = productSkuRepository;
         this.productNoticeRepository = productNoticeRepository;
         this.productRefundCommandRepository = productRefundCommandRepository;
+        this.productService = productService;
     }
 
     @BeforeEach
@@ -196,6 +202,24 @@ class ProductInternalApiIntegrationTest {
 
         List<ProductRefundCommand> commands = productRefundCommandRepository.findAll();
         assertThat(commands).hasSize(2);
+    }
+
+    @Test
+    void adminDeleteProductSoftDeletesProductAndKeepsSkuForHistory() {
+        SeededProduct seededProduct = seedProduct("Product Soft Delete", "SKU-SOFT-DELETE", 8800, 10, 0, true, true);
+
+        productService.deleteProduct(seededProduct.productId());
+
+        Product deletedProduct = productRepository.findById(seededProduct.productId()).orElseThrow();
+        assertThat(deletedProduct.getDeletedFlag()).isTrue();
+        assertThat(deletedProduct.getSaleStatus()).isEqualTo("OFF_SALE");
+        assertThat(productSkuRepository.findById(seededProduct.skuId())).isPresent();
+        assertThat(productRepository.findByDeletedFlagFalseOrderByIdDesc()).isEmpty();
+        verify(productSearchGateway).indexProduct(argThat(product ->
+            seededProduct.productId().equals(product.getId())
+                && Boolean.TRUE.equals(product.getDeletedFlag())
+                && "OFF_SALE".equals(product.getSaleStatus())
+        ));
     }
 
     private SeededProduct seedProduct(

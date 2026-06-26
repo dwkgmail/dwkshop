@@ -36,7 +36,7 @@ public class CartService {
         this.productCatalogClient = productCatalogClient;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public CartResponse listItems(Long userId) {
         return buildCartResponse(userId, cartItemRepository.findByUserIdOrderByIdDesc(userId));
     }
@@ -168,6 +168,8 @@ public class CartService {
             .distinct()
             .collect(Collectors.toMap(skuId -> skuId, productCatalogClient::getSkuSnapshot));
 
+        syncItemStates(items, skuMap);
+
         List<CartItemResponse> responses = items.stream()
             .map(item -> toResponse(item, skuMap.get(item.getSkuId())))
             .toList();
@@ -177,6 +179,26 @@ public class CartService {
             .map(CartItemResponse::estimatedAmount)
             .reduce(0, Integer::sum);
         return new CartResponse(userId, badgeCount, estimatedAmount, PriceFormatter.formatCents(estimatedAmount), responses);
+    }
+
+    private void syncItemStates(List<CartItem> items, Map<Long, ProductSkuSnapshot> skuMap) {
+        LocalDateTime now = LocalDateTime.now();
+        List<CartItem> changedItems = items.stream()
+            .filter(item -> {
+                CartItemState state = evaluateState(item, skuMap.get(item.getSkuId()));
+                boolean checked = Boolean.TRUE.equals(item.getCheckedFlag()) && state.canCheck();
+                return !state.status().equals(item.getItemStatus()) || !Boolean.valueOf(checked).equals(item.getCheckedFlag());
+            })
+            .peek(item -> {
+                CartItemState state = evaluateState(item, skuMap.get(item.getSkuId()));
+                item.setItemStatus(state.status());
+                item.setCheckedFlag(Boolean.TRUE.equals(item.getCheckedFlag()) && state.canCheck());
+                item.setUpdatedAt(now);
+            })
+            .toList();
+        if (!changedItems.isEmpty()) {
+            cartItemRepository.saveAll(changedItems);
+        }
     }
 
     private CartItemResponse toResponse(CartItem item, ProductSkuSnapshot sku) {

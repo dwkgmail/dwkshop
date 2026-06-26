@@ -5,6 +5,7 @@ import com.dwkshop.backend.product.dto.ProductDetailResponse;
 import com.dwkshop.backend.product.dto.ProductUpsertRequest;
 import jakarta.validation.Valid;
 import java.util.List;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -46,5 +47,10 @@ public class AdminProductController {
     @PostMapping("/{id}/off-sale")
     public ProductDetailResponse offSale(@PathVariable Long id) {
         return productService.offSale(id);
+    }
+
+    @DeleteMapping("/{id}")
+    public void deleteProduct(@PathVariable Long id) {
+        productService.deleteProduct(id);
     }
 }

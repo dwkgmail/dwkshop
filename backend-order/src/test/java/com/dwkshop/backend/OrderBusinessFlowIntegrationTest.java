@@ -235,6 +235,42 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     @Test
+    void createOrderUsesSettlementPriceSnapshotWhenSkuPriceChangesAfterConfirm() throws Exception {
+        when(productCatalogClient.getSkuSnapshot(506L))
+            .thenReturn(sku(506L, 5, 1000, true))
+            .thenReturn(sku(506L, 5, 1500, true));
+
+        String token = confirmToken("""
+            {
+              "sourceType": "BUY_NOW",
+              "skuId": 506,
+              "quantity": 1,
+              "addressId": 10
+            }
+            """);
+
+        mockMvc.perform(post("/api/orders/create")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "settlementToken": "%s",
+                      "expectedPayAmount": 1000
+                    }
+                    """.formatted(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.payAmount").value(1000))
+            .andExpect(jsonPath("$.items[0].salePrice").value(1000))
+            .andExpect(jsonPath("$.items[0].payAmount").value(1000));
+
+        TradeOrder order = tradeOrderRepository.findAll().get(0);
+        TradeOrderAmount amount = tradeOrderAmountRepository.findByOrderId(order.getId()).orElseThrow();
+        TradeOrderItem item = tradeOrderItemRepository.findByOrderId(order.getId()).get(0);
+        assertThat(order.getPayAmount()).isEqualTo(1000);
+        assertThat(amount.getPayAmount()).isEqualTo(1000);
+        assertThat(item.getSalePrice()).isEqualTo(1000);
+    }
+
+    @Test
     void pointDeductionIsPersistedAndRefundApprovalCompensatesOrderState() throws Exception {
         when(productCatalogClient.getSkuSnapshot(503L)).thenReturn(sku(503L, 5, 1500, true));
         when(memberClient.getPointAccount(1L)).thenReturn(new MemberPointAccount(1L, 50000));

@@ -115,7 +115,7 @@ public class OrderService {
         String token = "SETTLE-" + UUID.randomUUID();
         ConfirmOrderResponse response = toConfirmResponse(token, calculation, request.remark());
         // 在内存中暂存本次结算快照，用于校验金额并拦截重复提交。
-        settlementSessionStore.save(token, new SettlementSession(userId, request, response.amount().payAmount()), settlementTtl);
+        settlementSessionStore.save(token, new SettlementSession(userId, request, response.amount().payAmount(), toSnapshot(userId, request, calculation)), settlementTtl);
         return response;
     }
 
@@ -137,11 +137,8 @@ public class OrderService {
             if (session.used()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单已创建，请勿重复提交");
             }
-            // 创建订单前重新结算一次，确保库存、优惠券、积分等实时数据未发生变化。
-            SettlementCalculation calculation = calculate(userId, session.request());
-            if (!calculation.amount().payAmount().equals(request.expectedPayAmount())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单金额已变化，请重新确认");
-            }
+            // 创建订单使用确认页生成的短期价格快照，订单一旦创建即锁价。
+            SettlementCalculation calculation = calculationFromSnapshot(session);
             if (!session.expectedPayAmount().equals(request.expectedPayAmount())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单金额已变化，请重新确认");
             }
@@ -674,6 +671,50 @@ public class OrderService {
         // 积分按固定比例抵扣，但最低只抵到 0，不会把应付金额抵成负数。
         int deduction = selected ? Math.min(availablePoints / POINT_EXCHANGE_RATE, Math.max(remainingAmount, 0)) : 0;
         return new PointSelection(visible, availablePoints, deduction, selected);
+    }
+
+    private SettlementSnapshot toSnapshot(Long userId, ConfirmOrderRequest request, SettlementCalculation calculation) {
+        return new SettlementSnapshot(
+            userId,
+            request,
+            calculation.sourceType(),
+            calculation.address(),
+            calculation.items().stream()
+                .map(item -> new SettlementSnapshotItem(item.cartItemId(), item.sku(), item.quantity()))
+                .toList(),
+            calculation.selectedUserCouponId(),
+            calculation.availableCoupons(),
+            new SettlementPointSnapshot(
+                calculation.pointSelection().visible(),
+                calculation.pointSelection().availablePoints(),
+                calculation.pointSelection().deductionAmount(),
+                calculation.pointSelection().selected()
+            ),
+            calculation.amount()
+        );
+    }
+
+    private SettlementCalculation calculationFromSnapshot(SettlementSession session) {
+        SettlementSnapshot snapshot = session.snapshot();
+        if (snapshot == null) {
+            return calculate(session.userId(), session.request());
+        }
+        return new SettlementCalculation(
+            snapshot.sourceType(),
+            snapshot.address(),
+            snapshot.items().stream()
+                .map(item -> new SettlementItem(item.cartItemId(), item.sku(), item.quantity()))
+                .toList(),
+            snapshot.selectedUserCouponId(),
+            snapshot.availableCoupons(),
+            new PointSelection(
+                snapshot.pointSelection().visible(),
+                snapshot.pointSelection().availablePoints(),
+                snapshot.pointSelection().deductionAmount(),
+                snapshot.pointSelection().selected()
+            ),
+            snapshot.amount()
+        );
     }
 
     private OrderResponse persistOrder(Long userId, ConfirmOrderRequest request, SettlementCalculation calculation, String createRemark, String clientRequestId) {

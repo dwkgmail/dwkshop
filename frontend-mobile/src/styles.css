@@ -555,6 +555,13 @@ button:disabled {
   align-items: center;
 }
 
+.cart-warning {
+  margin: 8px 4px 0;
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .primary,
 .ghost {
   min-height: 42px;

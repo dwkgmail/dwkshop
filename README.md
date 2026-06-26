@@ -378,10 +378,15 @@ SKU 库存为 `0` 或 SKU 禁用时，接口返回 `selectable=false`。
 - `badgeCount`：购物车角标数量，按商品数量汇总
 - `estimatedAmount`：购物车预估金额，单位为分
 - `estimatedAmountText`：展示金额
+- `checkoutAvailable`：当前勾选商品是否可进入结算
+- `checkoutMessage`：不可结算原因，例如只选了不可单独购买商品，或混选了不同配送类型商品
+- `invalidItemCount`：失效购物车项数量
+- `selectedItemCount`：当前可结算勾选项数量
 - `items[].status`：`NORMAL`、`OFF_SALE`、`SKU_INVALID`、`STOCK_NOT_ENOUGH`、`NOT_ALLOW_CART`
 - `items[].canCheck`：是否允许勾选
 
 查询购物车会根据商品实时快照同步购物车项状态。商品下架、软删除、SKU 禁用或库存不足时，购物车项会标记为失效并自动取消勾选。
+购物车展示层会批量校验当前勾选项，只选不可单独购买商品或混选不同配送类型商品时会返回不可结算原因。
 
 购物车金额只做预估，最终金额以确认订单接口为准。
 

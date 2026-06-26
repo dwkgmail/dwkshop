@@ -7,6 +7,10 @@ public record CartResponse(
     Integer badgeCount,
     Integer estimatedAmount,
     String estimatedAmountText,
+    Boolean checkoutAvailable,
+    String checkoutMessage,
+    Integer invalidItemCount,
+    Integer selectedItemCount,
     List<CartItemResponse> items
 ) {
 }

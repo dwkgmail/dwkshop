@@ -178,7 +178,18 @@ public class CartService {
             .filter(item -> Boolean.TRUE.equals(item.checked()) && NORMAL.equals(item.status()))
             .map(CartItemResponse::estimatedAmount)
             .reduce(0, Integer::sum);
-        return new CartResponse(userId, badgeCount, estimatedAmount, PriceFormatter.formatCents(estimatedAmount), responses);
+        CartCheckoutState checkoutState = evaluateCheckout(responses, skuMap);
+        return new CartResponse(
+            userId,
+            badgeCount,
+            estimatedAmount,
+            PriceFormatter.formatCents(estimatedAmount),
+            checkoutState.available(),
+            checkoutState.message(),
+            checkoutState.invalidItemCount(),
+            checkoutState.selectedItemCount(),
+            responses
+        );
     }
 
     private void syncItemStates(List<CartItem> items, Map<Long, ProductSkuSnapshot> skuMap) {
@@ -261,11 +272,39 @@ public class CartService {
         return new CartItemState(NORMAL, null, true);
     }
 
+    private CartCheckoutState evaluateCheckout(List<CartItemResponse> responses, Map<Long, ProductSkuSnapshot> skuMap) {
+        int invalidItemCount = (int) responses.stream()
+            .filter(item -> !NORMAL.equals(item.status()))
+            .count();
+        List<CartItemResponse> selectedItems = responses.stream()
+            .filter(item -> Boolean.TRUE.equals(item.checked()) && Boolean.TRUE.equals(item.canCheck()))
+            .toList();
+        if (selectedItems.isEmpty()) {
+            return new CartCheckoutState(false, "Please select items to checkout", invalidItemCount, 0);
+        }
+        if (selectedItems.stream().allMatch(item -> !Boolean.TRUE.equals(item.allowSingleBuy()))) {
+            return new CartCheckoutState(false, "Product cannot be purchased separately", invalidItemCount, selectedItems.size());
+        }
+        long deliveryTypeCount = selectedItems.stream()
+            .map(item -> skuMap.get(item.skuId()))
+            .filter(sku -> sku != null && sku.deliveryType() != null)
+            .map(ProductSkuSnapshot::deliveryType)
+            .distinct()
+            .count();
+        if (deliveryTypeCount > 1) {
+            return new CartCheckoutState(false, "Different delivery types cannot be checked out together", invalidItemCount, selectedItems.size());
+        }
+        return new CartCheckoutState(true, null, invalidItemCount, selectedItems.size());
+    }
+
     private CartItem findUserCartItem(Long userId, Long itemId) {
         return cartItemRepository.findByIdAndUserId(itemId, userId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cart item does not exist"));
     }
 
     private record CartItemState(String status, String message, boolean canCheck) {
+    }
+
+    private record CartCheckoutState(boolean available, String message, int invalidItemCount, int selectedItemCount) {
     }
 }

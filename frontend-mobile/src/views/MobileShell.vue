@@ -342,6 +342,10 @@ async function openCartConfirm() {
     showToast('Please select items to checkout');
     return;
   }
+  if (cart.value && !cart.value.checkoutAvailable) {
+    showToast(cart.value.checkoutMessage ?? 'Selected items cannot be checked out together');
+    return;
+  }
   await openConfirm({ sourceType: 'CART', cartItemIds: ids, usePoints: true });
 }
 
@@ -702,8 +706,9 @@ onUnmounted(() => {
         <footer class="cart-bar">
           <label><input type="checkbox" :checked="allCartChecked" @change="toggleAllCartItems" /> 全选</label>
           <div><span>合计</span><strong>¥{{ cart?.estimatedAmountText ?? '0' }}</strong></div>
-          <button class="primary" @click="openCartConfirm">去结算</button>
+          <button class="primary" :disabled="cart ? !cart.checkoutAvailable : true" @click="openCartConfirm">去结算</button>
         </footer>
+        <p v-if="cart?.checkoutMessage" class="cart-warning">{{ cart.checkoutMessage }}</p>
       </section>
 
       <section v-else-if="route.view === 'confirm'" class="view">

@@ -342,6 +342,14 @@ public class OrderService {
         if (hasOnlyCannotSingleBuy || (!hasNormalSingleBuy && items.size() > 0)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品不可单独购买");
         }
+        long deliveryTypeCount = items.stream()
+            .map(item -> item.product().getDeliveryType())
+            .filter(deliveryType -> deliveryType != null && !deliveryType.isBlank())
+            .distinct()
+            .count();
+        if (deliveryTypeCount > 1) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Different delivery types cannot be checked out together");
+        }
     }
 
     private UserAddress resolveAddress(Long userId, Long addressId) {

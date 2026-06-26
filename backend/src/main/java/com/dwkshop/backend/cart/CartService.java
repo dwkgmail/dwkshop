@@ -46,7 +46,7 @@ public class CartService {
         this.productSkuRepository = productSkuRepository;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public CartResponse listItems(Long userId) {
         return buildCartResponse(userId, cartItemRepository.findByUserIdOrderByIdDesc(userId));
     }
@@ -165,6 +165,8 @@ public class CartService {
             .stream()
             .collect(Collectors.toMap(ProductSku::getId, Function.identity()));
 
+        syncItemStates(items, productMap, skuMap);
+
         List<CartItemResponse> responses = items.stream()
             .map(item -> toResponse(item, productMap.get(item.getProductId()), skuMap.get(item.getSkuId())))
             .toList();
@@ -173,7 +175,38 @@ public class CartService {
             .filter(item -> Boolean.TRUE.equals(item.checked()) && NORMAL.equals(item.status()))
             .map(CartItemResponse::estimatedAmount)
             .reduce(0, Integer::sum);
-        return new CartResponse(userId, badgeCount, estimatedAmount, PriceFormatter.formatCents(estimatedAmount), responses);
+        CartCheckoutState checkoutState = evaluateCheckout(responses, productMap);
+        return new CartResponse(
+            userId,
+            badgeCount,
+            estimatedAmount,
+            PriceFormatter.formatCents(estimatedAmount),
+            checkoutState.available(),
+            checkoutState.message(),
+            checkoutState.invalidItemCount(),
+            checkoutState.selectedItemCount(),
+            responses
+        );
+    }
+
+    private void syncItemStates(List<CartItem> items, Map<Long, Product> productMap, Map<Long, ProductSku> skuMap) {
+        LocalDateTime now = LocalDateTime.now();
+        List<CartItem> changedItems = items.stream()
+            .filter(item -> {
+                CartItemState state = evaluateState(item, productMap.get(item.getProductId()), skuMap.get(item.getSkuId()));
+                boolean checked = Boolean.TRUE.equals(item.getCheckedFlag()) && state.canCheck();
+                return !state.status().equals(item.getItemStatus()) || !Boolean.valueOf(checked).equals(item.getCheckedFlag());
+            })
+            .peek(item -> {
+                CartItemState state = evaluateState(item, productMap.get(item.getProductId()), skuMap.get(item.getSkuId()));
+                item.setItemStatus(state.status());
+                item.setCheckedFlag(Boolean.TRUE.equals(item.getCheckedFlag()) && state.canCheck());
+                item.setUpdatedAt(now);
+            })
+            .toList();
+        if (!changedItems.isEmpty()) {
+            cartItemRepository.saveAll(changedItems);
+        }
     }
 
     private CartItemResponse toResponse(CartItem item, Product product, ProductSku sku) {
@@ -225,6 +258,31 @@ public class CartService {
         return new CartItemState(NORMAL, null, true);
     }
 
+    private CartCheckoutState evaluateCheckout(List<CartItemResponse> responses, Map<Long, Product> productMap) {
+        int invalidItemCount = (int) responses.stream()
+            .filter(item -> !NORMAL.equals(item.status()))
+            .count();
+        List<CartItemResponse> selectedItems = responses.stream()
+            .filter(item -> Boolean.TRUE.equals(item.checked()) && Boolean.TRUE.equals(item.canCheck()))
+            .toList();
+        if (selectedItems.isEmpty()) {
+            return new CartCheckoutState(false, "Please select items to checkout", invalidItemCount, 0);
+        }
+        if (selectedItems.stream().allMatch(item -> !Boolean.TRUE.equals(item.allowSingleBuy()))) {
+            return new CartCheckoutState(false, "Product cannot be purchased separately", invalidItemCount, selectedItems.size());
+        }
+        long deliveryTypeCount = selectedItems.stream()
+            .map(item -> productMap.get(item.productId()))
+            .filter(product -> product != null && product.getDeliveryType() != null)
+            .map(Product::getDeliveryType)
+            .distinct()
+            .count();
+        if (deliveryTypeCount > 1) {
+            return new CartCheckoutState(false, "Different delivery types cannot be checked out together", invalidItemCount, selectedItems.size());
+        }
+        return new CartCheckoutState(true, null, invalidItemCount, selectedItems.size());
+    }
+
     private CartItem findUserCartItem(Long userId, Long itemId) {
         return cartItemRepository.findByIdAndUserId(itemId, userId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "购物车商品不存在"));
@@ -239,5 +297,8 @@ public class CartService {
     }
 
     private record CartItemState(String status, String message, boolean canCheck) {
+    }
+
+    private record CartCheckoutState(boolean available, String message, int invalidItemCount, int selectedItemCount) {
     }
 }

@@ -65,4 +65,76 @@ class CartServiceTest {
         assertThat(item.getCheckedFlag()).isFalse();
         verify(cartItemRepository).saveAll(List.of(item));
     }
+
+    @Test
+    void listItemsMarksCheckoutUnavailableWhenOnlyBundleItemsAreSelected() {
+        CartItem item = cartItem(1L, 100L, 200L, 1, true);
+
+        when(cartItemRepository.findByUserIdOrderByIdDesc(10L)).thenReturn(List.of(item));
+        when(productCatalogClient.getSkuSnapshot(200L)).thenReturn(snapshot(100L, 200L, "NORMAL", false));
+
+        CartResponse response = cartService.listItems(10L);
+
+        assertThat(response.checkoutAvailable()).isFalse();
+        assertThat(response.checkoutMessage()).isEqualTo("Product cannot be purchased separately");
+        assertThat(response.invalidItemCount()).isZero();
+        assertThat(response.selectedItemCount()).isEqualTo(1);
+    }
+
+    @Test
+    void listItemsMarksCheckoutUnavailableWhenSelectedItemsHaveDifferentDeliveryTypes() {
+        CartItem normalItem = cartItem(1L, 100L, 200L, 1, true);
+        CartItem coldChainItem = cartItem(2L, 101L, 201L, 1, true);
+
+        when(cartItemRepository.findByUserIdOrderByIdDesc(10L)).thenReturn(List.of(normalItem, coldChainItem));
+        when(productCatalogClient.getSkuSnapshot(200L)).thenReturn(snapshot(100L, 200L, "NORMAL", true));
+        when(productCatalogClient.getSkuSnapshot(201L)).thenReturn(snapshot(101L, 201L, "COLD_CHAIN", true));
+
+        CartResponse response = cartService.listItems(10L);
+
+        assertThat(response.checkoutAvailable()).isFalse();
+        assertThat(response.checkoutMessage()).isEqualTo("Different delivery types cannot be checked out together");
+        assertThat(response.invalidItemCount()).isZero();
+        assertThat(response.selectedItemCount()).isEqualTo(2);
+    }
+
+    private CartItem cartItem(Long id, Long productId, Long skuId, int quantity, boolean checked) {
+        CartItem item = new CartItem();
+        item.setId(id);
+        item.setUserId(10L);
+        item.setProductId(productId);
+        item.setSkuId(skuId);
+        item.setQuantity(quantity);
+        item.setCheckedFlag(checked);
+        item.setItemStatus("NORMAL");
+        item.setCreatedAt(LocalDateTime.now());
+        item.setUpdatedAt(LocalDateTime.now());
+        return item;
+    }
+
+    private ProductSkuSnapshot snapshot(Long productId, Long skuId, String deliveryType, boolean allowSingleBuy) {
+        return new ProductSkuSnapshot(
+            productId,
+            skuId,
+            1L,
+            "Product " + productId,
+            "Brand",
+            "/images/product.png",
+            "ON_SALE",
+            deliveryType,
+            false,
+            true,
+            allowSingleBuy,
+            false,
+            true,
+            1,
+            null,
+            null,
+            "Default",
+            "{}",
+            1000,
+            10,
+            "ENABLED"
+        );
+    }
 }

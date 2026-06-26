@@ -28,6 +28,10 @@ export interface CartResponse {
   badgeCount: number;
   estimatedAmount: number;
   estimatedAmountText: string;
+  checkoutAvailable: boolean;
+  checkoutMessage?: string;
+  invalidItemCount: number;
+  selectedItemCount: number;
   items: CartItem[];
 }
 

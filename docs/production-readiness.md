@@ -84,6 +84,46 @@ All runtime services use `logback-spring.xml` with Logstash JSON encoding. Each 
 
 Use `LOG_LEVEL_ROOT=DEBUG` only for short incident windows. Prefer package-specific overrides from the deployment platform when available.
 
+## Admin audit baseline
+
+The MVP explicitly leaves fine-grained permissions, complete operation logs and exports out of scope. Before production release, admin operations must be upgraded from simple operation logs to append-only audit records with permission checks and operation constraints.
+
+Audit coverage must include these high-risk operations:
+
+| Area | Operations |
+| --- | --- |
+| Product | create product, edit product, put product on sale, take product off sale |
+| SKU | update SKU price, update SKU stock |
+| Order | ship order, update logistics |
+| Aftersale | approve aftersale, reject aftersale, manual refund |
+| Inventory | repair inventory reconciliation differences |
+| Marketing | issue coupons |
+| Member | adjust points |
+
+Each audit record should capture:
+
+| Field | Purpose |
+| --- | --- |
+| `operatorId` | Admin user id. |
+| `operatorName` | Admin username or display name. |
+| `operationType` | Stable operation code, such as `SKU_PRICE_UPDATE` or `ORDER_SHIP`. |
+| `bizType` | Business object type, such as `PRODUCT`, `SKU`, `ORDER`, `AFTERSALE`, `COUPON` or `POINT`. |
+| `bizId` | Business object id. |
+| `beforeValue` | Minimal JSON snapshot before the change. |
+| `afterValue` | Minimal JSON snapshot after the change. |
+| `reason` | Operator-provided reason. Required for high-risk changes. |
+| `ip` | Source IP. |
+| `userAgent` | Source user agent. |
+| `createdAt` | Audit creation time. |
+
+Production constraints:
+
+- Audit writes must be atomic with the business change, or use a reliable compensation path that makes missing audit records visible.
+- High-risk operations must require explicit permissions and a non-empty reason. Do not silently fill the reason on the frontend.
+- `beforeValue` and `afterValue` must avoid secrets, tokens and unnecessary plaintext PII.
+- Audit records are append-only. Admin pages may search and export them, but must not edit or delete them.
+- Search filters must include operator, operation type, business type, business id and time range.
+
 ## Deployment checks
 
 1. Confirm all services return `UP` on `/actuator/health/readiness`.

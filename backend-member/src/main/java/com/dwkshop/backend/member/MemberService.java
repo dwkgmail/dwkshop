@@ -1,8 +1,10 @@
 package com.dwkshop.backend.member;
 
 import com.dwkshop.backend.domain.entity.UserAddress;
+import com.dwkshop.backend.domain.entity.PointFreeze;
 import com.dwkshop.backend.domain.entity.UserPointAccount;
 import com.dwkshop.backend.domain.entity.UserPointFlow;
+import com.dwkshop.backend.domain.repository.PointFreezeRepository;
 import com.dwkshop.backend.domain.repository.UserAddressRepository;
 import com.dwkshop.backend.domain.repository.UserPointAccountRepository;
 import com.dwkshop.backend.domain.repository.UserPointFlowRepository;
@@ -18,18 +20,23 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class MemberService {
 
+    private static final String SOURCE_ORDER = "ORDER";
+
     private final UserAddressRepository userAddressRepository;
     private final UserPointAccountRepository userPointAccountRepository;
     private final UserPointFlowRepository userPointFlowRepository;
+    private final PointFreezeRepository pointFreezeRepository;
 
     public MemberService(
         UserAddressRepository userAddressRepository,
         UserPointAccountRepository userPointAccountRepository,
-        UserPointFlowRepository userPointFlowRepository
+        UserPointFlowRepository userPointFlowRepository,
+        PointFreezeRepository pointFreezeRepository
     ) {
         this.userAddressRepository = userAddressRepository;
         this.userPointAccountRepository = userPointAccountRepository;
         this.userPointFlowRepository = userPointFlowRepository;
+        this.pointFreezeRepository = pointFreezeRepository;
     }
 
     @Transactional(readOnly = true)
@@ -79,6 +86,7 @@ public class MemberService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Point account does not exist"));
         int points = request.points();
         int before = account.getAvailablePoints();
+        int beforeLocked = account.getLockedPoints();
         int after;
         if ("POINT_FREEZE".equals(changeType)) {
             if (before < points) {
@@ -111,8 +119,64 @@ public class MemberService {
         LocalDateTime now = LocalDateTime.now();
         account.setUpdatedAt(now);
         userPointAccountRepository.save(account);
+        updatePointFreeze(userId, request, changeType, points, before, after, beforeLocked, account.getLockedPoints(), now);
         userPointFlowRepository.save(toFlow(userId, request, flowNo, changeType, points, before, after, now));
         return new MemberPointAccountResponse(userId, account.getAvailablePoints());
+    }
+
+    private void updatePointFreeze(
+        Long userId,
+        MemberPointCommandRequest request,
+        String changeType,
+        int points,
+        int before,
+        int after,
+        int beforeLocked,
+        int afterLocked,
+        LocalDateTime now
+    ) {
+        if ("POINT_FREEZE".equals(changeType)) {
+            PointFreeze freeze = pointFreezeRepository.findByBizNo(request.bizNo()).orElseGet(PointFreeze::new);
+            freeze.setUserId(userId);
+            freeze.setOrderId(request.orderId());
+            freeze.setBizNo(request.bizNo());
+            freeze.setSource(SOURCE_ORDER);
+            freeze.setFreezePoints(points);
+            freeze.setBeforeAvailablePoints(before);
+            freeze.setAfterAvailablePoints(after);
+            freeze.setBeforeLockedPoints(beforeLocked);
+            freeze.setAfterLockedPoints(afterLocked);
+            freeze.setStatus("FROZEN");
+            freeze.setIdempotencyKey(request.bizNo() + ":POINT_FREEZE");
+            freeze.setFrozenAt(now);
+            if (freeze.getCreatedAt() == null) {
+                freeze.setCreatedAt(now);
+            }
+            freeze.setUpdatedAt(now);
+            pointFreezeRepository.save(freeze);
+            return;
+        }
+
+        PointFreeze freeze = pointFreezeRepository.findByBizNo(request.bizNo()).orElse(null);
+        if (freeze == null) {
+            return;
+        }
+        freeze.setBeforeAvailablePoints(before);
+        freeze.setAfterAvailablePoints(after);
+        freeze.setBeforeLockedPoints(beforeLocked);
+        freeze.setAfterLockedPoints(afterLocked);
+        freeze.setUpdatedAt(now);
+        if ("POINT_DEDUCT".equals(changeType)) {
+            freeze.setStatus("DEDUCTED");
+            freeze.setDeductedAt(now);
+        } else if ("POINT_RELEASE".equals(changeType)) {
+            freeze.setStatus("RELEASED");
+            freeze.setReleasedAt(now);
+        } else if ("POINT_REFUND".equals(changeType)) {
+            freeze.setStatus("REFUNDED");
+            freeze.setRefundedAt(now);
+        }
+        pointFreezeRepository.save(freeze);
     }
 
     private UserPointFlow toFlow(
@@ -127,6 +191,7 @@ public class MemberService {
     ) {
         UserPointFlow flow = new UserPointFlow();
         flow.setUserId(userId);
+        flow.setSource(SOURCE_ORDER);
         flow.setFlowNo(flowNo);
         flow.setChangeType(changeType);
         flow.setChangePoints(signedChange(changeType, points));
@@ -135,6 +200,7 @@ public class MemberService {
         flow.setBizId(request.orderId());
         flow.setOrderId(request.orderId());
         flow.setBizNo(request.bizNo());
+        flow.setIdempotencyKey(flowNo);
         flow.setChangeAmount(signedChange(changeType, points));
         flow.setBeforeBalance(before);
         flow.setAfterBalance(after);

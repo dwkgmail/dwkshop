@@ -15,8 +15,8 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "user_point_flow")
-public class UserPointFlow {
+@Table(name = "point_freeze")
+public class PointFreeze {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -25,47 +25,45 @@ public class UserPointFlow {
     @Column(nullable = false)
     private Long userId;
 
+    @Column(nullable = false)
+    private Long orderId;
+
+    @Column(nullable = false, unique = true, length = 64)
+    private String bizNo;
+
     @Column(nullable = false, length = 30)
     private String source;
 
-    @Column(nullable = false, unique = true, length = 64)
-    private String flowNo;
-
-    @Column(nullable = false, length = 30)
-    private String changeType;
+    @Column(nullable = false)
+    private Integer freezePoints;
 
     @Column(nullable = false)
-    private Integer changePoints;
+    private Integer beforeAvailablePoints;
 
     @Column(nullable = false)
-    private Integer balanceAfter;
-
-    @Column(nullable = false, length = 30)
-    private String bizType;
-
-    private Long bizId;
-
-    private Long orderId;
-
-    @Column(length = 64)
-    private String bizNo;
-
-    @Column(nullable = false, unique = true, length = 128)
-    private String idempotencyKey;
+    private Integer afterAvailablePoints;
 
     @Column(nullable = false)
-    private Integer changeAmount;
+    private Integer beforeLockedPoints;
 
     @Column(nullable = false)
-    private Integer beforeBalance;
-
-    @Column(nullable = false)
-    private Integer afterBalance;
+    private Integer afterLockedPoints;
 
     @Column(nullable = false, length = 30)
     private String status;
 
-    private String remark;
+    @Column(nullable = false, unique = true, length = 128)
+    private String idempotencyKey;
+
+    private LocalDateTime frozenAt;
+
+    private LocalDateTime releasedAt;
+
+    private LocalDateTime deductedAt;
+
+    private LocalDateTime refundedAt;
 
     private LocalDateTime createdAt;
+
+    private LocalDateTime updatedAt;
 }

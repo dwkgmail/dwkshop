@@ -1,8 +1,12 @@
 package com.dwkshop.backend.marketing;
 
 import com.dwkshop.backend.domain.entity.Coupon;
+import com.dwkshop.backend.domain.entity.CouponLockFlow;
+import com.dwkshop.backend.domain.entity.CouponUseFlow;
 import com.dwkshop.backend.domain.entity.CouponUser;
+import com.dwkshop.backend.domain.repository.CouponLockFlowRepository;
 import com.dwkshop.backend.domain.repository.CouponRepository;
+import com.dwkshop.backend.domain.repository.CouponUseFlowRepository;
 import com.dwkshop.backend.domain.repository.CouponUserRepository;
 import com.dwkshop.backend.marketing.dto.MarketingCouponResponse;
 import com.dwkshop.backend.marketing.dto.MarketingCouponSelectionResponse;
@@ -24,13 +28,23 @@ public class MarketingService {
     private static final String USED = "USED";
     private static final String RELEASED = "RELEASED";
     private static final String REFUNDED = "REFUNDED";
+    private static final String SOURCE_ORDER = "ORDER";
 
     private final CouponUserRepository couponUserRepository;
     private final CouponRepository couponRepository;
+    private final CouponLockFlowRepository couponLockFlowRepository;
+    private final CouponUseFlowRepository couponUseFlowRepository;
 
-    public MarketingService(CouponUserRepository couponUserRepository, CouponRepository couponRepository) {
+    public MarketingService(
+        CouponUserRepository couponUserRepository,
+        CouponRepository couponRepository,
+        CouponLockFlowRepository couponLockFlowRepository,
+        CouponUseFlowRepository couponUseFlowRepository
+    ) {
         this.couponUserRepository = couponUserRepository;
         this.couponRepository = couponRepository;
+        this.couponLockFlowRepository = couponLockFlowRepository;
+        this.couponUseFlowRepository = couponUseFlowRepository;
     }
 
     @Transactional(readOnly = true)
@@ -85,11 +99,14 @@ public class MarketingService {
         if (!isUsable(coupon, productAmount)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "优惠券不可用");
         }
+        String beforeStatus = couponUser.getUserCouponStatus();
+        LocalDateTime now = LocalDateTime.now();
         couponUser.setUserCouponStatus(LOCKED);
         couponUser.setLockKey(normalizedLockKey);
-        couponUser.setLockedAt(LocalDateTime.now());
+        couponUser.setLockedAt(now);
         couponUser.setReleasedAt(null);
         couponUserRepository.save(couponUser);
+        saveLockFlow(couponUser, null, normalizedLockKey, "LOCK", beforeStatus, LOCKED, normalizedLockKey, now);
     }
 
     @Transactional
@@ -104,10 +121,13 @@ public class MarketingService {
         if (!LOCKED.equals(couponUser.getUserCouponStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "优惠券尚未锁定");
         }
+        String beforeStatus = couponUser.getUserCouponStatus();
+        LocalDateTime now = LocalDateTime.now();
         couponUser.setUserCouponStatus(USED);
-        couponUser.setUsedAt(LocalDateTime.now());
+        couponUser.setUsedAt(now);
         couponUser.setOrderId(orderId);
         couponUserRepository.save(couponUser);
+        saveUseFlow(couponUser, orderId, "USE", beforeStatus, USED, now);
     }
 
     @Transactional
@@ -119,10 +139,13 @@ public class MarketingService {
         if (!LOCKED.equals(couponUser.getUserCouponStatus())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "优惠券状态不允许释放");
         }
+        String beforeStatus = couponUser.getUserCouponStatus();
+        LocalDateTime now = LocalDateTime.now();
         couponUser.setUserCouponStatus(RELEASED);
-        couponUser.setReleasedAt(LocalDateTime.now());
+        couponUser.setReleasedAt(now);
         couponUser.setOrderId(orderId);
         couponUserRepository.save(couponUser);
+        saveLockFlow(couponUser, orderId, couponUser.getLockKey(), "RELEASE", beforeStatus, RELEASED, releaseIdempotencyKey(couponUser.getId(), orderId), now);
     }
 
     @Transactional
@@ -137,9 +160,12 @@ public class MarketingService {
         if (!USED.equals(couponUser.getUserCouponStatus()) || !orderId.equals(couponUser.getOrderId())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "优惠券状态不允许退回");
         }
+        String beforeStatus = couponUser.getUserCouponStatus();
+        LocalDateTime now = LocalDateTime.now();
         couponUser.setUserCouponStatus(REFUNDED);
-        couponUser.setRefundedAt(LocalDateTime.now());
+        couponUser.setRefundedAt(now);
         couponUserRepository.save(couponUser);
+        saveUseFlow(couponUser, orderId, "REFUND", beforeStatus, REFUNDED, now);
     }
 
     private CouponUser lockCouponUser(Long userId, Long userCouponId) {
@@ -155,12 +181,82 @@ public class MarketingService {
             && !now.isAfter(coupon.getUseEndTime());
     }
 
+    private void saveLockFlow(
+        CouponUser couponUser,
+        Long orderId,
+        String lockKey,
+        String flowType,
+        String beforeStatus,
+        String afterStatus,
+        String idempotencyKey,
+        LocalDateTime now
+    ) {
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey, flowType);
+        if (couponLockFlowRepository.existsByIdempotencyKey(normalizedIdempotencyKey)) {
+            return;
+        }
+        CouponLockFlow flow = new CouponLockFlow();
+        flow.setCouponUserId(couponUser.getId());
+        flow.setUserId(couponUser.getUserId());
+        flow.setOrderId(orderId);
+        flow.setSource(SOURCE_ORDER);
+        flow.setBizNo(bizNo(couponUser.getId(), orderId, flowType));
+        flow.setFlowType(flowType);
+        flow.setBeforeStatus(beforeStatus);
+        flow.setAfterStatus(afterStatus);
+        flow.setLockKey(lockKey);
+        flow.setIdempotencyKey(normalizedIdempotencyKey);
+        flow.setOperatedAt(now);
+        flow.setCreatedAt(now);
+        couponLockFlowRepository.save(flow);
+    }
+
+    private void saveUseFlow(
+        CouponUser couponUser,
+        Long orderId,
+        String flowType,
+        String beforeStatus,
+        String afterStatus,
+        LocalDateTime now
+    ) {
+        String idempotencyKey = normalizeIdempotencyKey(orderId + ":" + couponUser.getId(), flowType);
+        if (couponUseFlowRepository.existsByIdempotencyKey(idempotencyKey)) {
+            return;
+        }
+        CouponUseFlow flow = new CouponUseFlow();
+        flow.setCouponUserId(couponUser.getId());
+        flow.setUserId(couponUser.getUserId());
+        flow.setOrderId(orderId);
+        flow.setSource(SOURCE_ORDER);
+        flow.setBizNo(bizNo(couponUser.getId(), orderId, flowType));
+        flow.setFlowType(flowType);
+        flow.setBeforeStatus(beforeStatus);
+        flow.setAfterStatus(afterStatus);
+        flow.setIdempotencyKey(idempotencyKey);
+        flow.setOperatedAt(now);
+        flow.setCreatedAt(now);
+        couponUseFlowRepository.save(flow);
+    }
+
     private String normalizeLockKey(String lockKey) {
         String trimmed = lockKey == null ? "" : lockKey.trim();
         if (trimmed.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "优惠券锁定标识不能为空");
         }
         return trimmed.length() > 96 ? trimmed.substring(0, 96) : trimmed;
+    }
+
+    private String bizNo(Long couponUserId, Long orderId, String flowType) {
+        return "COUPON:" + couponUserId + ":" + (orderId == null ? "NO_ORDER" : orderId) + ":" + flowType;
+    }
+
+    private String releaseIdempotencyKey(Long couponUserId, Long orderId) {
+        return (orderId == null ? "NO_ORDER" : orderId) + ":" + couponUserId;
+    }
+
+    private String normalizeIdempotencyKey(String businessKey, String flowType) {
+        String key = businessKey + ":" + flowType;
+        return key.length() > 128 ? key.substring(0, 128) : key;
     }
 
     private MarketingCouponResponse toCouponResponse(CouponUser userCoupon, Coupon coupon, boolean selected) {

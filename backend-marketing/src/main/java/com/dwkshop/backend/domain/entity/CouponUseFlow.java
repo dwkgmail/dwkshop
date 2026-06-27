@@ -15,57 +15,42 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "user_point_flow")
-public class UserPointFlow {
+@Table(name = "coupon_use_flow")
+public class CouponUseFlow {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(nullable = false)
+    private Long couponUserId;
+
+    @Column(nullable = false)
     private Long userId;
+
+    @Column(nullable = false)
+    private Long orderId;
 
     @Column(nullable = false, length = 30)
     private String source;
 
-    @Column(nullable = false, unique = true, length = 64)
-    private String flowNo;
-
-    @Column(nullable = false, length = 30)
-    private String changeType;
-
-    @Column(nullable = false)
-    private Integer changePoints;
-
-    @Column(nullable = false)
-    private Integer balanceAfter;
-
-    @Column(nullable = false, length = 30)
-    private String bizType;
-
-    private Long bizId;
-
-    private Long orderId;
-
-    @Column(length = 64)
+    @Column(nullable = false, length = 96)
     private String bizNo;
+
+    @Column(nullable = false, length = 30)
+    private String flowType;
+
+    @Column(nullable = false, length = 30)
+    private String beforeStatus;
+
+    @Column(nullable = false, length = 30)
+    private String afterStatus;
 
     @Column(nullable = false, unique = true, length = 128)
     private String idempotencyKey;
 
     @Column(nullable = false)
-    private Integer changeAmount;
-
-    @Column(nullable = false)
-    private Integer beforeBalance;
-
-    @Column(nullable = false)
-    private Integer afterBalance;
-
-    @Column(nullable = false, length = 30)
-    private String status;
-
-    private String remark;
+    private LocalDateTime operatedAt;
 
     private LocalDateTime createdAt;
 }

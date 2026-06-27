@@ -213,8 +213,8 @@ const filteredCoupons = computed(() =>
 
 const filteredLogs = computed(() =>
   operationLogs.value.filter((item) => {
-    const text = `${item.adminUsername}${item.action}${item.targetType}${item.detail}`;
-    return (!logFilters.module || item.module === logFilters.module) && (!logFilters.keyword || text.includes(logFilters.keyword));
+    const text = `${item.operatorName}${item.operationType}${item.bizType}${item.bizId ?? ''}${item.reason ?? ''}`;
+    return (!logFilters.module || item.bizType === logFilters.module) && (!logFilters.keyword || text.includes(logFilters.keyword));
   })
 );
 
@@ -257,6 +257,12 @@ function formatCents(cents: number) {
 
 function formatTime(value?: string) {
   return value ? value.replace('T', ' ').slice(0, 16) : '-';
+}
+
+function formatLogValue(value?: string | null) {
+  if (!value) return '-';
+  const compact = value.replace(/\s+/g, ' ').trim();
+  return compact.length > 80 ? `${compact.slice(0, 80)}...` : compact;
 }
 
 function showToast(message: string) {
@@ -1218,31 +1224,38 @@ onUnmounted(() => {
       <section v-else-if="page === 'logs'" class="page">
         <section class="panel filters">
           <select v-model="logFilters.module">
-            <option value="">全部模块</option>
-            <option value="AFTERSALE">售后</option>
-            <option value="COUPON">优惠券</option>
-            <option value="USER">用户</option>
-            <option value="PERMISSION">权限</option>
-            <option value="SYSTEM">系统</option>
+            <option value="">????</option>
+            <option value="PRODUCT">??</option>
+            <option value="SKU">SKU</option>
+            <option value="ORDER">??</option>
+            <option value="AFTERSALE">??</option>
+            <option value="COUPON">???</option>
+            <option value="USER">??</option>
+            <option value="POINT">??</option>
+            <option value="INVENTORY">??</option>
+            <option value="PERMISSION">??</option>
           </select>
-          <input v-model="logFilters.keyword" placeholder="操作者 / 动作 / 详情" />
-          <button class="primary" type="button" @click="loadLogs">刷新</button>
+          <input v-model="logFilters.keyword" placeholder="??? / ?? / ??" />
+          <button class="primary" type="button" @click="loadLogs">??</button>
         </section>
         <section class="panel table-panel">
           <table>
-            <thead><tr><th>时间</th><th>操作者</th><th>模块</th><th>动作</th><th>对象</th><th>详情</th></tr></thead>
+            <thead><tr><th>??</th><th>???</th><th>??</th><th>??</th><th>??</th><th>??</th><th>??</th><th>IP</th><th>User Agent</th></tr></thead>
             <tbody>
               <tr v-for="log in filteredLogs" :key="log.id">
                 <td>{{ formatTime(log.createdAt) }}</td>
-                <td>{{ log.adminUsername }}</td>
-                <td>{{ log.module }}</td>
-                <td>{{ log.action }}</td>
-                <td>{{ log.targetType }} #{{ log.targetId ?? '-' }}</td>
-                <td>{{ log.detail }}</td>
+                <td>{{ log.operatorName }}</td>
+                <td>{{ log.operationType }}</td>
+                <td>{{ log.bizType }} #{{ log.bizId ?? '-' }}</td>
+                <td :title="log.beforeValue || ''">{{ formatLogValue(log.beforeValue) }}</td>
+                <td :title="log.afterValue || ''">{{ formatLogValue(log.afterValue) }}</td>
+                <td>{{ log.reason }}</td>
+                <td>{{ log.ip || '-' }}</td>
+                <td :title="log.userAgent || ''">{{ formatLogValue(log.userAgent) }}</td>
               </tr>
             </tbody>
           </table>
-          <div v-if="filteredLogs.length === 0" class="empty">暂无操作日志</div>
+          <div v-if="filteredLogs.length === 0" class="empty">??????</div>
         </section>
       </section>
 

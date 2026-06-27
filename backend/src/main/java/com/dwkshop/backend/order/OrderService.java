@@ -1,5 +1,6 @@
 package com.dwkshop.backend.order;
 
+import com.dwkshop.backend.admin.AdminOperationLogService;
 import com.dwkshop.backend.domain.entity.CartItem;
 import com.dwkshop.backend.domain.entity.Coupon;
 import com.dwkshop.backend.domain.entity.CouponUser;
@@ -46,6 +47,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -87,6 +89,7 @@ public class OrderService {
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
     private final SettlementSessionStore settlementSessionStore;
     private final ApplicationEventPublisher eventPublisher;
+    private final AdminOperationLogService operationLogService;
     private final ObjectMapper objectMapper;
     private final Duration settlementTtl;
 
@@ -104,6 +107,7 @@ public class OrderService {
         TradeOrderAmountRepository tradeOrderAmountRepository,
         SettlementSessionStore settlementSessionStore,
         ApplicationEventPublisher eventPublisher,
+        AdminOperationLogService operationLogService,
         ObjectMapper objectMapper,
         @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
@@ -120,6 +124,7 @@ public class OrderService {
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
         this.settlementSessionStore = settlementSessionStore;
         this.eventPublisher = eventPublisher;
+        this.operationLogService = operationLogService;
         this.objectMapper = objectMapper;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
     }
@@ -248,10 +253,11 @@ public class OrderService {
     @Transactional
     public OrderResponse shipOrder(Long orderId, AdminShipOrderRequest request) {
         TradeOrder order = tradeOrderRepository.findById(orderId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "?????"));
         if (!"WAIT_SHIP".equals(order.getOrderStatus()) || !"PAID".equals(order.getPayStatus())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前订单不可发货");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "????????");
         }
+        Map<String, Object> beforeSnapshot = snapshotOrder(order);
         LocalDateTime now = LocalDateTime.now();
         order.setOrderStatus("WAIT_RECEIVE");
         order.setDeliveryStatus(DELIVERY_SHIPPED);
@@ -261,17 +267,19 @@ public class OrderService {
         order.setDeliveryTime(now);
         order.setUpdatedAt(now);
         tradeOrderRepository.save(order);
+        operationLogService.record("ORDER_SHIP", "ORDER", orderId, beforeSnapshot, snapshotOrder(order), "????");
         return toOrderResponse(order);
     }
 
     @Transactional
     public OrderResponse updateDeliveryStatus(Long orderId, AdminUpdateDeliveryStatusRequest request) {
         TradeOrder order = tradeOrderRepository.findById(orderId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "?????"));
         if (DELIVERY_UNSHIPPED.equals(order.getDeliveryStatus()) || order.getDeliveryTime() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单尚未发货");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "??????");
         }
         String targetStatus = normalizeDeliveryStatus(request.deliveryStatus());
+        Map<String, Object> beforeSnapshot = snapshotOrder(order);
         LocalDateTime now = LocalDateTime.now();
         order.setDeliveryStatus(targetStatus);
         order.setDeliveryRemark(normalizeOptionalText(request.deliveryRemark()));
@@ -283,7 +291,23 @@ public class OrderService {
         }
         order.setUpdatedAt(now);
         tradeOrderRepository.save(order);
+        operationLogService.record("ORDER_DELIVERY_STATUS_UPDATE", "ORDER", orderId, beforeSnapshot, snapshotOrder(order), "????");
         return toOrderResponse(order);
+    }
+
+    private Map<String, Object> snapshotOrder(TradeOrder order) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("id", order.getId());
+        snapshot.put("orderNo", order.getOrderNo());
+        snapshot.put("orderStatus", order.getOrderStatus());
+        snapshot.put("payStatus", order.getPayStatus());
+        snapshot.put("deliveryStatus", order.getDeliveryStatus());
+        snapshot.put("logisticsCompany", order.getLogisticsCompany());
+        snapshot.put("logisticsNo", order.getLogisticsNo());
+        snapshot.put("deliveryRemark", order.getDeliveryRemark());
+        snapshot.put("deliveryTime", order.getDeliveryTime());
+        snapshot.put("finishTime", order.getFinishTime());
+        return snapshot;
     }
 
     private SettlementCalculation calculate(Long userId, ConfirmOrderRequest request) {

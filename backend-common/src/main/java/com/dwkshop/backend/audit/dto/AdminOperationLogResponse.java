@@ -1,9 +1,8 @@
-package com.dwkshop.backend.admin.dto;
+package com.dwkshop.backend.audit.dto;
 
 import java.time.LocalDateTime;
 
 public record AdminOperationLogResponse(
-    Long id,
     Long operatorId,
     String operatorName,
     String operationType,
@@ -14,11 +13,6 @@ public record AdminOperationLogResponse(
     String reason,
     String ip,
     String userAgent,
-    LocalDateTime createdAt,
-    String module,
-    String action,
-    String targetType,
-    Long targetId,
-    String detail
+    LocalDateTime createdAt
 ) {
 }

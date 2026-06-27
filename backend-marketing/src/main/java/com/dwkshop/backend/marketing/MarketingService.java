@@ -4,6 +4,7 @@ import com.dwkshop.backend.domain.entity.Coupon;
 import com.dwkshop.backend.domain.entity.CouponLockFlow;
 import com.dwkshop.backend.domain.entity.CouponUseFlow;
 import com.dwkshop.backend.domain.entity.CouponUser;
+import com.dwkshop.backend.audit.AdminOperationLogService;
 import com.dwkshop.backend.domain.repository.CouponLockFlowRepository;
 import com.dwkshop.backend.domain.repository.CouponRepository;
 import com.dwkshop.backend.domain.repository.CouponUseFlowRepository;
@@ -34,17 +35,20 @@ public class MarketingService {
     private final CouponRepository couponRepository;
     private final CouponLockFlowRepository couponLockFlowRepository;
     private final CouponUseFlowRepository couponUseFlowRepository;
+    private final AdminOperationLogService operationLogService;
 
     public MarketingService(
         CouponUserRepository couponUserRepository,
         CouponRepository couponRepository,
         CouponLockFlowRepository couponLockFlowRepository,
-        CouponUseFlowRepository couponUseFlowRepository
+        CouponUseFlowRepository couponUseFlowRepository,
+        AdminOperationLogService operationLogService
     ) {
         this.couponUserRepository = couponUserRepository;
         this.couponRepository = couponRepository;
         this.couponLockFlowRepository = couponLockFlowRepository;
         this.couponUseFlowRepository = couponUseFlowRepository;
+        this.operationLogService = operationLogService;
     }
 
     @Transactional(readOnly = true)
@@ -107,6 +111,7 @@ public class MarketingService {
         couponUser.setReleasedAt(null);
         couponUserRepository.save(couponUser);
         saveLockFlow(couponUser, null, normalizedLockKey, "LOCK", beforeStatus, LOCKED, normalizedLockKey, now);
+        operationLogService.record("COUPON_LOCK", "COUPON_USER", userCouponId, couponSnapshot(couponUser, beforeStatus), couponSnapshot(couponUser, LOCKED), "优惠券锁定");
     }
 
     @Transactional
@@ -128,6 +133,7 @@ public class MarketingService {
         couponUser.setOrderId(orderId);
         couponUserRepository.save(couponUser);
         saveUseFlow(couponUser, orderId, "USE", beforeStatus, USED, now);
+        operationLogService.record("COUPON_USE", "COUPON_USER", userCouponId, couponSnapshot(couponUser, beforeStatus), couponSnapshot(couponUser, USED), "优惠券核销");
     }
 
     @Transactional
@@ -146,6 +152,7 @@ public class MarketingService {
         couponUser.setOrderId(orderId);
         couponUserRepository.save(couponUser);
         saveLockFlow(couponUser, orderId, couponUser.getLockKey(), "RELEASE", beforeStatus, RELEASED, releaseIdempotencyKey(couponUser.getId(), orderId), now);
+        operationLogService.record("COUPON_RELEASE", "COUPON_USER", userCouponId, couponSnapshot(couponUser, beforeStatus), couponSnapshot(couponUser, RELEASED), "优惠券释放");
     }
 
     @Transactional
@@ -166,6 +173,7 @@ public class MarketingService {
         couponUser.setRefundedAt(now);
         couponUserRepository.save(couponUser);
         saveUseFlow(couponUser, orderId, "REFUND", beforeStatus, REFUNDED, now);
+        operationLogService.record("COUPON_REFUND", "COUPON_USER", userCouponId, couponSnapshot(couponUser, beforeStatus), couponSnapshot(couponUser, REFUNDED), "优惠券退回");
     }
 
     private CouponUser lockCouponUser(Long userId, Long userCouponId) {
@@ -257,6 +265,17 @@ public class MarketingService {
     private String normalizeIdempotencyKey(String businessKey, String flowType) {
         String key = businessKey + ":" + flowType;
         return key.length() > 128 ? key.substring(0, 128) : key;
+    }
+
+    private java.util.Map<String, Object> couponSnapshot(CouponUser couponUser, String status) {
+        java.util.Map<String, Object> snapshot = new java.util.LinkedHashMap<>();
+        snapshot.put("id", couponUser.getId());
+        snapshot.put("userId", couponUser.getUserId());
+        snapshot.put("couponId", couponUser.getCouponId());
+        snapshot.put("status", status);
+        snapshot.put("orderId", couponUser.getOrderId());
+        snapshot.put("lockKey", couponUser.getLockKey());
+        return snapshot;
     }
 
     private MarketingCouponResponse toCouponResponse(CouponUser userCoupon, Coupon coupon, boolean selected) {

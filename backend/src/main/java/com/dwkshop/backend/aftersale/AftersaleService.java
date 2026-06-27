@@ -16,7 +16,9 @@ import com.dwkshop.backend.domain.repository.TradeOrderRepository;
 import com.dwkshop.backend.product.PriceFormatter;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -132,6 +134,7 @@ public class AftersaleService {
         TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
 
+        Map<String, Object> beforeSnapshot = snapshotAftersale(aftersale, order);
         LocalDateTime now = LocalDateTime.now();
         order.setAftersaleStatus(REFUNDING);
         order.setUpdatedAt(now);
@@ -141,7 +144,7 @@ public class AftersaleService {
         aftersale.setAuditTime(now);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
-        operationLogService.record("AFTERSALE", "APPROVE", "AFTERSALE", id, "Aftersale approved, refunding: " + aftersale.getAftersaleNo());
+        operationLogService.record("AFTERSALE_APPROVE", "AFTERSALE", id, beforeSnapshot, snapshotAftersale(aftersale, order), "??????");
         return toResponse(aftersale, order);
     }
 
@@ -158,6 +161,7 @@ public class AftersaleService {
         TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
 
+        Map<String, Object> beforeSnapshot = snapshotAftersale(aftersale, order);
         LocalDateTime now = LocalDateTime.now();
         refundOrderStock(order);
         List<TradeOrderItem> items = tradeOrderItemRepository.findByOrderId(order.getId());
@@ -180,7 +184,7 @@ public class AftersaleService {
         aftersale.setRefundTime(now);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
-        operationLogService.record("AFTERSALE", "REFUND_COMPLETE", "AFTERSALE", id, "Aftersale refund completed: " + aftersale.getAftersaleNo());
+        operationLogService.record("AFTERSALE_MANUAL_REFUND", "AFTERSALE", id, beforeSnapshot, snapshotAftersale(aftersale, order), "????");
         return toResponse(aftersale, order);
     }
 
@@ -247,6 +251,7 @@ public class AftersaleService {
         TradeOrder order = tradeOrderRepository.findById(aftersale.getOrderId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
 
+        Map<String, Object> beforeSnapshot = snapshotAftersale(aftersale, order);
         LocalDateTime now = LocalDateTime.now();
         aftersale.setAftersaleStatus(REJECTED);
         aftersale.setRejectReason(request == null || request.rejectReason() == null || request.rejectReason().isBlank() ? "Rejected by admin" : request.rejectReason().trim());
@@ -257,8 +262,23 @@ public class AftersaleService {
         order.setAftersaleStatus(REJECTED);
         order.setUpdatedAt(now);
         tradeOrderRepository.save(order);
-        operationLogService.record("AFTERSALE", "REJECT", "AFTERSALE", id, "Aftersale rejected: " + aftersale.getRejectReason());
+        operationLogService.record("AFTERSALE_REJECT", "AFTERSALE", id, beforeSnapshot, snapshotAftersale(aftersale, order), "????");
         return toResponse(aftersale, order);
+    }
+
+    private Map<String, Object> snapshotAftersale(AftersaleOrder aftersale, TradeOrder order) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("id", aftersale.getId());
+        snapshot.put("aftersaleNo", aftersale.getAftersaleNo());
+        snapshot.put("aftersaleStatus", aftersale.getAftersaleStatus());
+        snapshot.put("refundAmount", aftersale.getRefundAmount());
+        snapshot.put("reason", aftersale.getReason());
+        snapshot.put("rejectReason", aftersale.getRejectReason());
+        snapshot.put("auditTime", aftersale.getAuditTime());
+        snapshot.put("refundTime", aftersale.getRefundTime());
+        snapshot.put("orderStatus", order == null ? null : order.getOrderStatus());
+        snapshot.put("deliveryStatus", order == null ? null : order.getDeliveryStatus());
+        return snapshot;
     }
 
     private void refundOrderStock(TradeOrder order) {

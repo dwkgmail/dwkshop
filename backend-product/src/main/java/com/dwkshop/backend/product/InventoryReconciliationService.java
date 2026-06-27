@@ -3,6 +3,7 @@ package com.dwkshop.backend.product;
 import com.dwkshop.backend.domain.entity.InventoryReconciliationRepairRecord;
 import com.dwkshop.backend.domain.entity.ProductSku;
 import com.dwkshop.backend.domain.repository.InventoryReconciliationRepairRecordRepository;
+import com.dwkshop.backend.audit.AdminOperationLogService;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.product.dto.InventoryHealthCheckResponse;
 import com.dwkshop.backend.product.dto.InventoryReconciliationEventResponse;
@@ -13,6 +14,7 @@ import com.dwkshop.backend.product.dto.InventoryRepairRecordResponse;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.Properties;
@@ -39,6 +41,7 @@ public class InventoryReconciliationService {
     private final ProductSkuRepository productSkuRepository;
     private final InventoryReconciliationRepairRecordRepository repairRecordRepository;
     private final OrderClient orderClient;
+    private final AdminOperationLogService operationLogService;
     private final ObjectProvider<RabbitAdmin> rabbitAdminProvider;
     private final List<String> deadLetterQueues;
     private final int pendingMinutes;
@@ -48,6 +51,7 @@ public class InventoryReconciliationService {
         ProductSkuRepository productSkuRepository,
         InventoryReconciliationRepairRecordRepository repairRecordRepository,
         OrderClient orderClient,
+        AdminOperationLogService operationLogService,
         ObjectProvider<RabbitAdmin> rabbitAdminProvider,
         @Value("${dwkshop.inventory-reconciliation.pending-minutes:10}") int pendingMinutes,
         @Value("#{'${dwkshop.inventory-reconciliation.dead-letter-queues:dwkshop.inventory.product.dead,dwkshop.refund.approved.product.dead}'.split(',')}") List<String> deadLetterQueues
@@ -56,6 +60,7 @@ public class InventoryReconciliationService {
         this.productSkuRepository = productSkuRepository;
         this.repairRecordRepository = repairRecordRepository;
         this.orderClient = orderClient;
+        this.operationLogService = operationLogService;
         this.rabbitAdminProvider = rabbitAdminProvider;
         this.pendingMinutes = pendingMinutes;
         this.deadLetterQueues = deadLetterQueues;
@@ -112,7 +117,10 @@ public class InventoryReconciliationService {
         }
         ProductSku sku = productSkuRepository.findByIdForUpdate(skuId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "SKU does not exist"));
+        Map<String, Object> beforeSnapshot = snapshotSku(sku, row.projectedLockedStock());
         productSkuRepository.updateLockedStock(skuId, row.projectedLockedStock());
+        ProductSku saved = productSkuRepository.findById(skuId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "SKU does not exist"));
 
         InventoryReconciliationRepairRecord record = new InventoryReconciliationRepairRecord();
         record.setSkuId(skuId);
@@ -124,7 +132,20 @@ public class InventoryReconciliationService {
         record.setOperator(blankToDefault(operator, "system"));
         record.setReason(trim(reason));
         record.setCreatedAt(LocalDateTime.now());
-        return toRepairRecord(repairRecordRepository.save(record));
+        InventoryRepairRecordResponse response = toRepairRecord(repairRecordRepository.save(record));
+        operationLogService.record("INVENTORY_REPAIR", "SKU", skuId, beforeSnapshot, snapshotSku(saved, row.projectedLockedStock()), trim(reason));
+        return response;
+    }
+
+    private Map<String, Object> snapshotSku(ProductSku sku, Integer projectedLockedStock) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("skuId", sku.getId());
+        snapshot.put("skuCode", sku.getSkuCode());
+        snapshot.put("skuName", sku.getSkuName());
+        snapshot.put("stock", sku.getStock());
+        snapshot.put("lockedStock", sku.getLockedStock());
+        snapshot.put("projectedLockedStock", projectedLockedStock);
+        return snapshot;
     }
 
     @Scheduled(cron = "${dwkshop.inventory-reconciliation.cron:0 0 * * * *}")

@@ -67,14 +67,22 @@ export interface AdminAccount {
 
 export interface OperationLog {
   id: number;
-  adminUserId?: number;
-  adminUsername: string;
-  module: string;
-  action: string;
-  targetType: string;
-  targetId?: number;
-  detail: string;
+  operatorId?: number;
+  operatorName: string;
+  operationType: string;
+  bizType: string;
+  bizId?: number;
+  beforeValue?: string | null;
+  afterValue?: string | null;
+  reason: string;
+  ip?: string | null;
+  userAgent?: string | null;
   createdAt: string;
+  module?: string;
+  action?: string;
+  targetType?: string;
+  targetId?: number;
+  detail?: string;
 }
 
 export interface InventoryReconciliationOrder {

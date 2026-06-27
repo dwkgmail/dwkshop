@@ -23,6 +23,7 @@ import com.dwkshop.backend.product.dto.RefundStockItemRequest;
 import com.dwkshop.backend.product.dto.RefundStockItemResponse;
 import com.dwkshop.backend.product.dto.RefundStockRequest;
 import com.dwkshop.backend.product.dto.RefundStockResponse;
+import com.dwkshop.backend.audit.AdminOperationLogService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dwkshop.backend.util.PriceFormatter;
@@ -30,6 +31,7 @@ import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -54,6 +56,7 @@ public class ProductService {
     private final ProductNoticeRepository productNoticeRepository;
     private final ProductRefundCommandRepository productRefundCommandRepository;
     private final ProductSearchGateway productSearchGateway;
+    private final AdminOperationLogService operationLogService;
     private final ObjectMapper objectMapper;
 
     public ProductService(
@@ -63,6 +66,7 @@ public class ProductService {
         ProductNoticeRepository productNoticeRepository,
         ProductRefundCommandRepository productRefundCommandRepository,
         ProductSearchGateway productSearchGateway,
+        AdminOperationLogService operationLogService,
         ObjectMapper objectMapper
     ) {
         this.productRepository = productRepository;
@@ -71,6 +75,7 @@ public class ProductService {
         this.productNoticeRepository = productNoticeRepository;
         this.productRefundCommandRepository = productRefundCommandRepository;
         this.productSearchGateway = productSearchGateway;
+        this.operationLogService = operationLogService;
         this.objectMapper = objectMapper;
     }
 
@@ -218,6 +223,7 @@ public class ProductService {
         List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
         ProductNotice notice = saveNotice(saved.getId(), request.noticeTitle(), request.noticeContent(), now);
         productSearchGateway.indexProduct(saved);
+        operationLogService.record("PRODUCT_CREATE", "PRODUCT", saved.getId(), null, snapshotProduct(saved, skus, notice), "创建商品");
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
     }
 
@@ -227,6 +233,9 @@ public class ProductService {
         Product product = productRepository.findById(id)
             .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "商品不存在"));
+        List<ProductSku> beforeSkus = productSkuRepository.findByProductId(id);
+        ProductNotice beforeNotice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(id).orElse(null);
+        Map<String, Object> beforeSnapshot = snapshotProduct(product, beforeSkus, beforeNotice);
         LocalDateTime now = LocalDateTime.now();
         applyProductRequest(product, request, now, false);
         Product saved = productRepository.save(product);
@@ -234,6 +243,7 @@ public class ProductService {
         List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
         ProductNotice notice = saveNotice(saved.getId(), request.noticeTitle(), request.noticeContent(), now);
         productSearchGateway.indexProduct(saved);
+        operationLogService.record("PRODUCT_UPDATE", "PRODUCT", saved.getId(), beforeSnapshot, snapshotProduct(saved, skus, notice), "更新商品");
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
     }
 
@@ -252,22 +262,37 @@ public class ProductService {
         Product product = productRepository.findById(id)
             .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Product does not exist"));
+        List<ProductSku> skus = productSkuRepository.findByProductId(id);
+        ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(id).orElse(null);
+        Map<String, Object> beforeSnapshot = snapshotProduct(product, skus, notice);
         product.setDeletedFlag(true);
         product.setSaleStatus(OFF_SALE);
         product.setUpdatedAt(LocalDateTime.now());
-        productSearchGateway.indexProduct(productRepository.save(product));
+        Product saved = productRepository.save(product);
+        productSearchGateway.indexProduct(saved);
+        operationLogService.record("PRODUCT_DELETE", "PRODUCT", id, beforeSnapshot, snapshotProduct(saved, skus, notice), "删除商品");
     }
 
     private ProductDetailResponse changeSaleStatus(Long id, String saleStatus) {
         Product product = productRepository.findById(id)
             .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "商品不存在"));
+        List<ProductSku> skus = productSkuRepository.findByProductId(id);
+        ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(id).orElse(null);
+        Map<String, Object> beforeSnapshot = snapshotProduct(product, skus, notice);
         product.setSaleStatus(saleStatus);
         product.setUpdatedAt(LocalDateTime.now());
         Product saved = productRepository.save(product);
-        List<ProductSku> skus = productSkuRepository.findByProductId(saved.getId());
-        ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(saved.getId()).orElse(null);
+        notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(saved.getId()).orElse(null);
         productSearchGateway.indexProduct(saved);
+        operationLogService.record(
+            "PRODUCT_SALE_STATUS_UPDATE",
+            "PRODUCT",
+            id,
+            beforeSnapshot,
+            snapshotProduct(saved, skus, notice),
+            ON_SALE.equals(saleStatus) ? "商品上架" : "商品下架"
+        );
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
     }
 
@@ -473,6 +498,59 @@ public class ProductService {
             sku.getSkuStatus(),
             selectable
         );
+    }
+
+    private Map<String, Object> snapshotProduct(Product product, List<ProductSku> skus, ProductNotice notice) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("product", snapshotProductFields(product));
+        snapshot.put("skus", skus == null ? List.of() : skus.stream().map(this::snapshotSku).toList());
+        snapshot.put("notice", notice == null ? null : snapshotNotice(notice));
+        return snapshot;
+    }
+
+    private Map<String, Object> snapshotProductFields(Product product) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("id", product.getId());
+        snapshot.put("categoryId", product.getCategoryId());
+        snapshot.put("productCode", product.getProductCode());
+        snapshot.put("name", product.getName());
+        snapshot.put("subtitle", product.getSubtitle());
+        snapshot.put("mainImageUrl", product.getMainImageUrl());
+        snapshot.put("productType", product.getProductType());
+        snapshot.put("saleStatus", product.getSaleStatus());
+        snapshot.put("deliveryType", product.getDeliveryType());
+        snapshot.put("allowCart", product.getAllowCart());
+        snapshot.put("allowSingleBuy", product.getAllowSingleBuy());
+        snapshot.put("supportPointDeduction", product.getSupportPointDeduction());
+        snapshot.put("supportRefund", product.getSupportRefund());
+        snapshot.put("supportPointReward", product.getSupportPointReward());
+        snapshot.put("pointReward", product.getPointReward());
+        snapshot.put("virtualSales", product.getVirtualSales());
+        snapshot.put("actualSales", product.getActualSales());
+        snapshot.put("deletedFlag", product.getDeletedFlag());
+        return snapshot;
+    }
+
+    private Map<String, Object> snapshotSku(ProductSku sku) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("id", sku.getId());
+        snapshot.put("skuCode", sku.getSkuCode());
+        snapshot.put("skuName", sku.getSkuName());
+        snapshot.put("specJson", sku.getSpecJson());
+        snapshot.put("salePrice", sku.getSalePrice());
+        snapshot.put("linePrice", sku.getLinePrice());
+        snapshot.put("stock", sku.getStock());
+        snapshot.put("lockedStock", sku.getLockedStock());
+        snapshot.put("skuStatus", sku.getSkuStatus());
+        return snapshot;
+    }
+
+    private Map<String, Object> snapshotNotice(ProductNotice notice) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("title", notice.getNoticeTitle());
+        snapshot.put("content", notice.getNoticeContent());
+        snapshot.put("enabledFlag", notice.getEnabledFlag());
+        return snapshot;
     }
 
     private CategoryResponse toCategory(ProductCategory category) {

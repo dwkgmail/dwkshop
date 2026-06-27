@@ -8,6 +8,7 @@ import com.dwkshop.backend.domain.repository.ProductCategoryRepository;
 import com.dwkshop.backend.domain.repository.ProductNoticeRepository;
 import com.dwkshop.backend.domain.repository.ProductRepository;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
+import com.dwkshop.backend.admin.AdminOperationLogService;
 import com.dwkshop.backend.product.dto.AdminProductResponse;
 import com.dwkshop.backend.product.dto.CategoryResponse;
 import com.dwkshop.backend.product.dto.ProductDetailResponse;
@@ -17,6 +18,7 @@ import com.dwkshop.backend.product.dto.ProductSummaryResponse;
 import com.dwkshop.backend.product.dto.ProductUpsertRequest;
 import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -42,19 +44,22 @@ public class ProductService {
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductNoticeRepository productNoticeRepository;
     private final ProductSearchGateway productSearchGateway;
+    private final AdminOperationLogService operationLogService;
 
     public ProductService(
         ProductRepository productRepository,
         ProductSkuRepository productSkuRepository,
         ProductCategoryRepository productCategoryRepository,
         ProductNoticeRepository productNoticeRepository,
-        ProductSearchGateway productSearchGateway
+        ProductSearchGateway productSearchGateway,
+        AdminOperationLogService operationLogService
     ) {
         this.productRepository = productRepository;
         this.productSkuRepository = productSkuRepository;
         this.productCategoryRepository = productCategoryRepository;
         this.productNoticeRepository = productNoticeRepository;
         this.productSearchGateway = productSearchGateway;
+        this.operationLogService = operationLogService;
     }
 
     @Transactional(readOnly = true)
@@ -108,12 +113,13 @@ public class ProductService {
         ensureCategoryExists(request.categoryId());
         LocalDateTime now = LocalDateTime.now();
         Product product = new Product();
-        // 商品主信息、SKU 和购买须知分开保存，便于后台独立维护。
+        // ??????SKU ???????????????????
         applyProductRequest(product, request, now, true);
         Product saved = productRepository.save(product);
         List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
         ProductNotice notice = saveNotice(saved.getId(), request.noticeTitle(), request.noticeContent(), now);
         productSearchGateway.indexProduct(saved);
+        operationLogService.record("PRODUCT_CREATE", "PRODUCT", saved.getId(), null, snapshotProduct(saved, skus), "????");
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
     }
 
@@ -122,7 +128,9 @@ public class ProductService {
         ensureCategoryExists(request.categoryId());
         Product product = productRepository.findById(id)
             .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "商品不存在"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "?????"));
+        List<ProductSku> beforeSkus = productSkuRepository.findByProductId(id);
+        Map<String, Object> beforeSnapshot = snapshotProduct(product, beforeSkus);
         LocalDateTime now = LocalDateTime.now();
         applyProductRequest(product, request, now, false);
         Product saved = productRepository.save(product);
@@ -130,6 +138,8 @@ public class ProductService {
         List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
         ProductNotice notice = saveNotice(saved.getId(), request.noticeTitle(), request.noticeContent(), now);
         productSearchGateway.indexProduct(saved);
+        operationLogService.record("PRODUCT_UPDATE", "PRODUCT", saved.getId(), beforeSnapshot, snapshotProduct(saved, skus), "????");
+        logSkuUpdates(beforeSkus, request.skus());
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
     }
 
@@ -146,14 +156,80 @@ public class ProductService {
     private ProductDetailResponse changeSaleStatus(Long id, String saleStatus) {
         Product product = productRepository.findById(id)
             .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "商品不存在"));
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "?????"));
+        String beforeSaleStatus = product.getSaleStatus();
         product.setSaleStatus(saleStatus);
         product.setUpdatedAt(LocalDateTime.now());
         Product saved = productRepository.save(product);
         List<ProductSku> skus = productSkuRepository.findByProductId(saved.getId());
         ProductNotice notice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(saved.getId()).orElse(null);
         productSearchGateway.indexProduct(saved);
+        operationLogService.record("PRODUCT_SALE_STATUS_UPDATE", "PRODUCT", saved.getId(), snapshot("saleStatus", beforeSaleStatus), snapshot("saleStatus", saved.getSaleStatus()), ON_SALE.equals(saleStatus) ? "????" : "????");
         return toDetail(saved, skus, notice, !ON_SALE.equals(saved.getSaleStatus()));
+    }
+
+    private Map<String, Object> snapshotProduct(Product product, List<ProductSku> skus) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        if (product != null) {
+            snapshot.put("id", product.getId());
+            snapshot.put("categoryId", product.getCategoryId());
+            snapshot.put("productCode", product.getProductCode());
+            snapshot.put("name", product.getName());
+            snapshot.put("saleStatus", product.getSaleStatus());
+        }
+        snapshot.put("skus", skus == null ? List.of() : skus.stream().map(this::snapshotSku).toList());
+        return snapshot;
+    }
+
+    private Map<String, Object> snapshotSku(ProductSku sku) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("id", sku.getId());
+        snapshot.put("skuCode", sku.getSkuCode());
+        snapshot.put("skuName", sku.getSkuName());
+        snapshot.put("salePrice", sku.getSalePrice());
+        snapshot.put("linePrice", sku.getLinePrice());
+        snapshot.put("stock", sku.getStock());
+        snapshot.put("lockedStock", sku.getLockedStock());
+        snapshot.put("skuStatus", sku.getSkuStatus());
+        return snapshot;
+    }
+
+    private Map<String, Object> snapshotSkuRequest(ProductSkuRequest request) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("skuCode", request.skuCode());
+        snapshot.put("skuName", request.skuName());
+        snapshot.put("salePrice", request.salePrice());
+        snapshot.put("linePrice", request.linePrice());
+        snapshot.put("stock", request.stock());
+        snapshot.put("skuStatus", request.skuStatus());
+        return snapshot;
+    }
+
+    private Map<String, Object> snapshot(String key, Object value) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put(key, value);
+        return snapshot;
+    }
+
+    private void logSkuUpdates(List<ProductSku> beforeSkus, List<ProductSkuRequest> requests) {
+        Map<String, ProductSku> beforeByCode = beforeSkus.stream()
+            .filter(sku -> sku.getSkuCode() != null && !sku.getSkuCode().isBlank())
+            .collect(java.util.stream.Collectors.toMap(ProductSku::getSkuCode, sku -> sku, (left, right) -> left));
+        for (ProductSkuRequest request : requests) {
+            if (request.skuCode() == null || request.skuCode().isBlank()) {
+                continue;
+            }
+            ProductSku before = beforeByCode.get(request.skuCode().trim());
+            if (before == null) {
+                continue;
+            }
+            if (!java.util.Objects.equals(before.getSalePrice(), request.salePrice())) {
+                operationLogService.record("SKU_PRICE_UPDATE", "SKU", before.getId(), snapshotSku(before), snapshotSkuRequest(request), "SKU??");
+            }
+            if (!java.util.Objects.equals(before.getStock(), request.stock())) {
+                operationLogService.record("SKU_STOCK_UPDATE", "SKU", before.getId(), snapshotSku(before), snapshotSkuRequest(request), "SKU???");
+            }
+        }
     }
 
     private List<Product> loadProductsBySearchOrder(List<Long> ids) {

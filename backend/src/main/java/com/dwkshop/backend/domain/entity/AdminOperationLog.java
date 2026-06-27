@@ -22,10 +22,33 @@ public class AdminOperationLog {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private Long adminUserId;
+    private Long operatorId;
 
     @Column(nullable = false, length = 64)
-    private String adminUsername;
+    private String operatorName;
+
+    @Column(nullable = false, length = 64)
+    private String operationType;
+
+    @Column(nullable = false, length = 64)
+    private String bizType;
+
+    private Long bizId;
+
+    @Column(columnDefinition = "TEXT")
+    private String beforeValue;
+
+    @Column(columnDefinition = "TEXT")
+    private String afterValue;
+
+    @Column(length = 500)
+    private String reason;
+
+    @Column(length = 64)
+    private String ip;
+
+    @Column(length = 255)
+    private String userAgent;
 
     @Column(nullable = false, length = 64)
     private String module;

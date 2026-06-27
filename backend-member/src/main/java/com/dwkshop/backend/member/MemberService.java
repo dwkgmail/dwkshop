@@ -4,6 +4,7 @@ import com.dwkshop.backend.domain.entity.UserAddress;
 import com.dwkshop.backend.domain.entity.PointFreeze;
 import com.dwkshop.backend.domain.entity.UserPointAccount;
 import com.dwkshop.backend.domain.entity.UserPointFlow;
+import com.dwkshop.backend.audit.AdminOperationLogService;
 import com.dwkshop.backend.domain.repository.PointFreezeRepository;
 import com.dwkshop.backend.domain.repository.UserAddressRepository;
 import com.dwkshop.backend.domain.repository.UserPointAccountRepository;
@@ -26,17 +27,20 @@ public class MemberService {
     private final UserPointAccountRepository userPointAccountRepository;
     private final UserPointFlowRepository userPointFlowRepository;
     private final PointFreezeRepository pointFreezeRepository;
+    private final AdminOperationLogService operationLogService;
 
     public MemberService(
         UserAddressRepository userAddressRepository,
         UserPointAccountRepository userPointAccountRepository,
         UserPointFlowRepository userPointFlowRepository,
-        PointFreezeRepository pointFreezeRepository
+        PointFreezeRepository pointFreezeRepository,
+        AdminOperationLogService operationLogService
     ) {
         this.userAddressRepository = userAddressRepository;
         this.userPointAccountRepository = userPointAccountRepository;
         this.userPointFlowRepository = userPointFlowRepository;
         this.pointFreezeRepository = pointFreezeRepository;
+        this.operationLogService = operationLogService;
     }
 
     @Transactional(readOnly = true)
@@ -121,6 +125,14 @@ public class MemberService {
         userPointAccountRepository.save(account);
         updatePointFreeze(userId, request, changeType, points, before, after, beforeLocked, account.getLockedPoints(), now);
         userPointFlowRepository.save(toFlow(userId, request, flowNo, changeType, points, before, after, now));
+        operationLogService.record(
+            changeType,
+            "POINT",
+            userId,
+            pointSnapshot(userId, before, beforeLocked),
+            pointSnapshot(userId, after, account.getLockedPoints()),
+            "积分调整"
+        );
         return new MemberPointAccountResponse(userId, account.getAvailablePoints());
     }
 
@@ -216,6 +228,14 @@ public class MemberService {
             case "POINT_RELEASE", "POINT_REFUND" -> points;
             default -> 0;
         };
+    }
+
+    private java.util.Map<String, Object> pointSnapshot(Long userId, int availablePoints, int lockedPoints) {
+        java.util.Map<String, Object> snapshot = new java.util.LinkedHashMap<>();
+        snapshot.put("userId", userId);
+        snapshot.put("availablePoints", availablePoints);
+        snapshot.put("lockedPoints", lockedPoints);
+        return snapshot;
     }
 
     private MemberAddressResponse toAddress(UserAddress address) {

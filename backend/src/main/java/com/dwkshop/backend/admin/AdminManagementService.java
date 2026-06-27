@@ -24,6 +24,7 @@ import com.dwkshop.backend.domain.repository.UserRepository;
 import com.dwkshop.backend.product.PriceFormatter;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -80,10 +81,11 @@ public class AdminManagementService {
     public AdminUserResponse updateUserStatus(Long id, AdminStatusRequest request) {
         User user = userRepository.findById(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        String beforeStatus = user.getStatus();
         user.setStatus(normalizeStatus(request.status()));
         user.setUpdatedAt(LocalDateTime.now());
         userRepository.save(user);
-        operationLogService.record("USER", "UPDATE_STATUS", "USER", id, "用户状态更新为 " + user.getStatus());
+        operationLogService.record("USER_STATUS_UPDATE", "USER", id, snapshot("status", beforeStatus), snapshot("status", user.getStatus()), "更新用户状态");
         return toUserResponse(user);
     }
 
@@ -105,7 +107,7 @@ public class AdminManagementService {
         coupon.setCreatedAt(LocalDateTime.now());
         coupon.setUpdatedAt(LocalDateTime.now());
         Coupon saved = couponRepository.save(coupon);
-        operationLogService.record("COUPON", "CREATE", "COUPON", saved.getId(), saved.getName());
+        operationLogService.record("COUPON_CREATE", "COUPON", saved.getId(), null, snapshot(saved), "创建优惠券");
         return toCouponResponse(saved);
     }
 
@@ -113,10 +115,11 @@ public class AdminManagementService {
     public AdminCouponResponse updateCouponStatus(Long id, AdminStatusRequest request) {
         Coupon coupon = couponRepository.findById(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Coupon not found"));
+        String beforeStatus = coupon.getCouponStatus();
         coupon.setCouponStatus(normalizeStatus(request.status()));
         coupon.setUpdatedAt(LocalDateTime.now());
         couponRepository.save(coupon);
-        operationLogService.record("COUPON", "UPDATE_STATUS", "COUPON", id, "优惠券状态更新为 " + coupon.getCouponStatus());
+        operationLogService.record("COUPON_STATUS_UPDATE", "COUPON", id, snapshot("status", beforeStatus), snapshot("status", coupon.getCouponStatus()), "更新优惠券状态");
         return toCouponResponse(coupon);
     }
 
@@ -144,14 +147,16 @@ public class AdminManagementService {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Admin user not found"));
         AdminRole role = adminRoleRepository.findById(request.roleId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Role not found"));
-        AdminUserRole relation = adminUserRoleRepository.findFirstByAdminUserId(adminUserId).orElseGet(AdminUserRole::new);
-        if (relation.getAdminUserId() == null) {
+        AdminUserRole relation = adminUserRoleRepository.findFirstByAdminUserId(adminUserId).orElse(null);
+        Long beforeRoleId = relation == null ? null : relation.getRoleId();
+        if (relation == null) {
+            relation = new AdminUserRole();
             relation.setAdminUserId(adminUserId);
             relation.setCreatedAt(LocalDateTime.now());
         }
         relation.setRoleId(role.getId());
         adminUserRoleRepository.save(relation);
-        operationLogService.record("PERMISSION", "ASSIGN_ROLE", "ADMIN_USER", adminUserId, admin.getUsername() + " -> " + role.getRoleName());
+        operationLogService.record("ADMIN_ROLE_ASSIGN", "ADMIN_USER", adminUserId, snapshot("roleId", beforeRoleId), snapshot("roleId", role.getId()), "分配管理员角色");
         return toAdminAccountResponse(admin, Map.of(role.getId(), role));
     }
 
@@ -159,10 +164,11 @@ public class AdminManagementService {
     public AdminAccountResponse updateAdminStatus(Long adminUserId, AdminStatusRequest request) {
         AdminUser admin = adminUserRepository.findById(adminUserId)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Admin user not found"));
+        String beforeStatus = admin.getStatus();
         admin.setStatus(normalizeStatus(request.status()));
         admin.setUpdatedAt(LocalDateTime.now());
         adminUserRepository.save(admin);
-        operationLogService.record("PERMISSION", "UPDATE_ADMIN_STATUS", "ADMIN_USER", adminUserId, "管理员状态更新为 " + admin.getStatus());
+        operationLogService.record("ADMIN_STATUS_UPDATE", "ADMIN_USER", adminUserId, snapshot("status", beforeStatus), snapshot("status", admin.getStatus()), "更新管理员状态");
         Map<Long, AdminRole> roles = adminRoleRepository.findAll().stream().collect(Collectors.toMap(AdminRole::getId, Function.identity()));
         return toAdminAccountResponse(admin, roles);
     }
@@ -252,5 +258,25 @@ public class AdminManagementService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported status");
         }
         return normalized;
+    }
+
+    private Map<String, Object> snapshot(String key, Object value) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put(key, value);
+        return snapshot;
+    }
+
+    private Map<String, Object> snapshot(Coupon coupon) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("id", coupon.getId());
+        snapshot.put("couponCode", coupon.getCouponCode());
+        snapshot.put("name", coupon.getName());
+        snapshot.put("couponType", coupon.getCouponType());
+        snapshot.put("thresholdAmount", coupon.getThresholdAmount());
+        snapshot.put("discountAmount", coupon.getDiscountAmount());
+        snapshot.put("discountRate", coupon.getDiscountRate());
+        snapshot.put("totalQuantity", coupon.getTotalQuantity());
+        snapshot.put("couponStatus", coupon.getCouponStatus());
+        return snapshot;
     }
 }

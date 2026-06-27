@@ -1,5 +1,7 @@
 package com.dwkshop.backend.admin;
 
+import com.dwkshop.backend.auth.RequiresConfirmation;
+import com.dwkshop.backend.auth.RequiresPermission;
 import com.dwkshop.backend.admin.dto.AdminAccountResponse;
 import com.dwkshop.backend.admin.dto.AdminAssignRoleRequest;
 import com.dwkshop.backend.admin.dto.AdminCouponRequest;
@@ -31,51 +33,64 @@ public class AdminManagementController {
     }
 
     @GetMapping("/users")
+    @RequiresPermission("user:read")
     public List<AdminUserResponse> users() {
         return adminManagementService.listUsers();
     }
 
     @PatchMapping("/users/{id}/status")
+    @RequiresPermission("user:write")
+    @RequiresConfirmation
     public AdminUserResponse updateUserStatus(@PathVariable Long id, @Valid @RequestBody AdminStatusRequest request) {
         return adminManagementService.updateUserStatus(id, request);
     }
 
     @GetMapping("/coupons")
+    @RequiresPermission("coupon:read")
     public List<AdminCouponResponse> coupons() {
         return adminManagementService.listCoupons();
     }
 
     @PostMapping("/coupons")
+    @RequiresPermission("coupon:write")
     public AdminCouponResponse createCoupon(@Valid @RequestBody AdminCouponRequest request) {
         return adminManagementService.createCoupon(request);
     }
 
     @PatchMapping("/coupons/{id}/status")
+    @RequiresPermission("coupon:write")
     public AdminCouponResponse updateCouponStatus(@PathVariable Long id, @Valid @RequestBody AdminStatusRequest request) {
         return adminManagementService.updateCouponStatus(id, request);
     }
 
     @GetMapping("/roles")
+    @RequiresPermission("permission:manage")
     public List<AdminRoleResponse> roles() {
         return adminManagementService.listRoles();
     }
 
     @GetMapping("/admin-users")
+    @RequiresPermission("permission:manage")
     public List<AdminAccountResponse> adminUsers() {
         return adminManagementService.listAdminAccounts();
     }
 
     @PatchMapping("/admin-users/{id}/role")
+    @RequiresPermission("permission:manage")
+    @RequiresConfirmation
     public AdminAccountResponse assignRole(@PathVariable Long id, @Valid @RequestBody AdminAssignRoleRequest request) {
         return adminManagementService.assignRole(id, request);
     }
 
     @PatchMapping("/admin-users/{id}/status")
+    @RequiresPermission("permission:manage")
+    @RequiresConfirmation
     public AdminAccountResponse updateAdminStatus(@PathVariable Long id, @Valid @RequestBody AdminStatusRequest request) {
         return adminManagementService.updateAdminStatus(id, request);
     }
 
     @GetMapping("/operation-logs")
+    @RequiresPermission("log:read")
     public List<AdminOperationLogResponse> operationLogs() {
         return operationLogService.listRecent();
     }

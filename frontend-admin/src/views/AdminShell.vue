@@ -570,9 +570,13 @@ async function saveProduct() {
 }
 
 async function changeSaleStatus(id: number, status: 'ON_SALE' | 'OFF_SALE') {
+  const reason = status === 'OFF_SALE'
+    ? window.prompt('请输入下架原因', '商品运营手动下架')?.trim()
+    : undefined;
+  if (status === 'OFF_SALE' && !reason) return;
   await runTask(async () => {
     if (status === 'ON_SALE') await onSaleProduct(id);
-    else await offSaleProduct(id);
+    else await offSaleProduct(id, reason as string);
     await loadProductsQuietly();
     showToast(status === 'ON_SALE' ? '商品已上架' : '商品已下架');
   });
@@ -632,8 +636,10 @@ async function submitDeliveryStatus() {
 }
 
 async function approveRefund(id: number) {
+  const reason = window.prompt('请输入售后审批原因', '售后客服审批通过')?.trim();
+  if (!reason) return;
   await runTask(async () => {
-    await approveAftersale(id);
+    await approveAftersale(id, reason);
     await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly(), loadLogsQuietly().catch(() => undefined)]);
     showToast('售后已通过');
   });
@@ -648,8 +654,10 @@ async function confirmReturned(id: number) {
 }
 
 async function completeRefund(id: number) {
+  const reason = window.prompt('请输入人工退款确认原因', '财务确认退款已完成')?.trim();
+  if (!reason) return;
   await runTask(async () => {
-    await completeAftersaleRefund(id);
+    await completeAftersaleRefund(id, reason);
     await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly(), loadLogsQuietly().catch(() => undefined)]);
     showToast('退款已完成');
   });
@@ -665,8 +673,10 @@ async function failRefund(id: number) {
 }
 
 async function retryRefund(id: number) {
+  const reason = window.prompt('请输入重试退款原因', '财务重试退款')?.trim();
+  if (!reason) return;
   await runTask(async () => {
-    await retryAftersaleRefund(id);
+    await retryAftersaleRefund(id, reason);
     await Promise.all([loadAftersalesQuietly(), loadOrdersQuietly(), loadLogsQuietly().catch(() => undefined)]);
     showToast('退款已重新发起');
   });
@@ -736,16 +746,22 @@ async function toggleCoupon(item: AdminCoupon) {
 }
 
 async function toggleMember(item: AdminMember) {
+  const nextStatus = item.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  const reason = window.prompt('请输入用户状态变更原因', `用户状态${nextStatus}`)?.trim();
+  if (!reason) return;
   await runTask(async () => {
-    await updateMemberStatus(item.id, item.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE');
+    await updateMemberStatus(item.id, nextStatus, reason);
     await Promise.all([loadMembersQuietly(), loadLogsQuietly().catch(() => undefined)]);
     showToast('用户状态已更新');
   });
 }
 
 async function toggleAdminAccount(item: AdminAccount) {
+  const nextStatus = item.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  const reason = window.prompt('请输入管理员账号状态变更原因', `管理员账号${nextStatus}`)?.trim();
+  if (!reason) return;
   await runTask(async () => {
-    await updateAdminAccountStatus(item.id, item.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE');
+    await updateAdminAccountStatus(item.id, nextStatus, reason);
     await Promise.all([loadAdminAccountsQuietly(), loadLogsQuietly().catch(() => undefined)]);
     showToast('管理员状态已更新');
   });
@@ -754,8 +770,10 @@ async function toggleAdminAccount(item: AdminAccount) {
 async function changeAdminRole(account: AdminAccount, event: Event) {
   const roleId = Number((event.target as HTMLSelectElement).value);
   if (!roleId) return;
+  const reason = window.prompt('请输入角色调整原因', '超级管理员调整后台角色')?.trim();
+  if (!reason) return;
   await runTask(async () => {
-    await assignAdminRole(account.id, roleId);
+    await assignAdminRole(account.id, roleId, reason);
     await Promise.all([loadAdminAccountsQuietly(), loadLogsQuietly().catch(() => undefined)]);
     showToast('角色已分配');
   });

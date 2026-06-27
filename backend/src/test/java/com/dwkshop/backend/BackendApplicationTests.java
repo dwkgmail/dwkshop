@@ -487,7 +487,9 @@ class BackendApplicationTests {
         Integer aftersaleId = com.jayway.jsonpath.JsonPath.read(applied.getResponse().getContentAsString(), "$.id");
 
         mockMvc.perform(post("/admin/aftersales/{id}/approve", aftersaleId)
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test approval"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"))
             .andExpect(jsonPath("$.refundTime").doesNotExist());
@@ -502,6 +504,8 @@ class BackendApplicationTests {
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/fail", aftersaleId)
                 .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "Payment channel timeout")
                 .contentType("application/json")
                 .content("""
                     {"failureReason":"Payment channel timeout"}
@@ -511,12 +515,16 @@ class BackendApplicationTests {
             .andExpect(jsonPath("$.rejectReason").value("Payment channel timeout"));
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/retry", aftersaleId)
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test retry"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", aftersaleId)
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test complete"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
             .andExpect(jsonPath("$.refundTime").isNotEmpty());
@@ -654,12 +662,16 @@ class BackendApplicationTests {
 
         mockMvc.perform(patch("/admin/users/{id}/status", 1)
                 .header("Authorization", "Bearer " + token)
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test member status")
                 .contentType("application/json")
                 .content("{\"status\":\"DISABLED\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value("DISABLED"));
         mockMvc.perform(patch("/admin/users/{id}/status", 1)
                 .header("Authorization", "Bearer " + token)
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test member restore")
                 .contentType("application/json")
                 .content("{\"status\":\"ACTIVE\"}"))
             .andExpect(status().isOk());
@@ -692,6 +704,8 @@ class BackendApplicationTests {
 
         mockMvc.perform(patch("/admin/admin-users/{id}/role", 1)
                 .header("Authorization", "Bearer " + token)
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test role assignment")
                 .contentType("application/json")
                 .content("{\"roleId\":2}"))
             .andExpect(status().isOk())

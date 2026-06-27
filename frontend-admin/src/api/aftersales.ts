@@ -35,9 +35,17 @@ export function getAftersales() {
   return request<Aftersale[]>('/admin/aftersales');
 }
 
-export function approveAftersale(id: number) {
+function confirmationHeaders(reason: string) {
+  return {
+    'X-Admin-Confirm': 'true',
+    'X-Admin-Reason': reason
+  };
+}
+
+export function approveAftersale(id: number, reason: string) {
   return request<Aftersale>(`/admin/aftersales/${id}/approve`, {
-    method: 'POST'
+    method: 'POST',
+    headers: confirmationHeaders(reason)
   });
 }
 
@@ -47,22 +55,25 @@ export function confirmAftersaleReturned(id: number) {
   });
 }
 
-export function completeAftersaleRefund(id: number) {
+export function completeAftersaleRefund(id: number, reason: string) {
   return request<Aftersale>(`/admin/aftersales/${id}/refund/complete`, {
-    method: 'POST'
+    method: 'POST',
+    headers: confirmationHeaders(reason)
   });
 }
 
 export function failAftersaleRefund(id: number, failureReason: string) {
   return request<Aftersale>(`/admin/aftersales/${id}/refund/fail`, {
     method: 'POST',
+    headers: confirmationHeaders(failureReason),
     body: JSON.stringify({ failureReason })
   });
 }
 
-export function retryAftersaleRefund(id: number) {
+export function retryAftersaleRefund(id: number, reason: string) {
   return request<Aftersale>(`/admin/aftersales/${id}/refund/retry`, {
-    method: 'POST'
+    method: 'POST',
+    headers: confirmationHeaders(reason)
   });
 }
 

@@ -6,7 +6,7 @@ relationship and not a database foreign key.
 
 | Schema | Owner | Tables | External identifiers (no FK) |
 | --- | --- | --- | --- |
-| `dwkshop_auth` | auth-service | `user`, `admin_user` | none |
+| `dwkshop_auth` | auth-service | `user`, `admin_user`, `admin_role`, `admin_user_role` | none |
 | `dwkshop_product` | product-service | `product_category`, `product`, `product_sku`, `product_notice`, `product_refund_command`, `inventory_order_item_state`, `inventory_consumed_event`, `inventory_reconciliation_repair_record` | none |
 | `dwkshop_cart` | cart-service | `cart_item` | `user_id`, `product_id`, `sku_id` |
 | `dwkshop_member` | member-service | `user_address`, `user_point_account`, `user_point_flow`, `point_freeze` | `user_id`, `biz_id`, `order_id` |

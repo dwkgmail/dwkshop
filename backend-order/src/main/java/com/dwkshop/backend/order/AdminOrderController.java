@@ -1,5 +1,6 @@
 package com.dwkshop.backend.order;
 
+import com.dwkshop.backend.auth.RequiresPermission;
 import com.dwkshop.backend.order.dto.AdminShipOrderRequest;
 import com.dwkshop.backend.order.dto.AdminUpdateDeliveryStatusRequest;
 import com.dwkshop.backend.order.dto.OrderResponse;
@@ -24,21 +25,25 @@ public class AdminOrderController {
     }
 
     @GetMapping
+    @RequiresPermission("order:read")
     public List<OrderSummaryResponse> listOrders() {
         return orderService.listAdminOrders();
     }
 
     @GetMapping("/{id}")
+    @RequiresPermission("order:read")
     public OrderResponse detail(@PathVariable Long id) {
         return orderService.getAdminOrder(id);
     }
 
     @PostMapping("/{id}/ship")
+    @RequiresPermission("order:ship")
     public OrderResponse ship(@PathVariable Long id, @Valid @RequestBody AdminShipOrderRequest request) {
         return orderService.shipOrder(id, request);
     }
 
     @PostMapping("/{id}/delivery-status")
+    @RequiresPermission("order:ship")
     public OrderResponse updateDeliveryStatus(
         @PathVariable Long id,
         @Valid @RequestBody AdminUpdateDeliveryStatusRequest request

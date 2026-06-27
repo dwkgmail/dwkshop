@@ -1,5 +1,7 @@
 package com.dwkshop.backend.product;
 
+import com.dwkshop.backend.auth.RequiresConfirmation;
+import com.dwkshop.backend.auth.RequiresPermission;
 import com.dwkshop.backend.product.dto.AdminProductResponse;
 import com.dwkshop.backend.product.dto.ProductDetailResponse;
 import com.dwkshop.backend.product.dto.ProductUpsertRequest;
@@ -25,31 +27,39 @@ public class AdminProductController {
     }
 
     @GetMapping
+    @RequiresPermission("product:read")
     public List<AdminProductResponse> listProducts() {
         return productService.listAdminProducts();
     }
 
     @PostMapping
+    @RequiresPermission("product:write")
     public ProductDetailResponse createProduct(@Valid @RequestBody ProductUpsertRequest request) {
         return productService.createProduct(request);
     }
 
     @PutMapping("/{id}")
+    @RequiresPermission("product:write")
     public ProductDetailResponse updateProduct(@PathVariable Long id, @Valid @RequestBody ProductUpsertRequest request) {
         return productService.updateProduct(id, request);
     }
 
     @PostMapping("/{id}/on-sale")
+    @RequiresPermission("product:publish")
     public ProductDetailResponse onSale(@PathVariable Long id) {
         return productService.onSale(id);
     }
 
     @PostMapping("/{id}/off-sale")
+    @RequiresPermission("product:publish")
+    @RequiresConfirmation
     public ProductDetailResponse offSale(@PathVariable Long id) {
         return productService.offSale(id);
     }
 
     @DeleteMapping("/{id}")
+    @RequiresPermission("product:write")
+    @RequiresConfirmation
     public void deleteProduct(@PathVariable Long id) {
         productService.deleteProduct(id);
     }

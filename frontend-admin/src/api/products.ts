@@ -105,6 +105,12 @@ export function onSaleProduct(id: number) {
   return request<ProductDetail>(`/admin/products/${id}/on-sale`, { method: 'POST' });
 }
 
-export function offSaleProduct(id: number) {
-  return request<ProductDetail>(`/admin/products/${id}/off-sale`, { method: 'POST' });
+export function offSaleProduct(id: number, reason: string) {
+  return request<ProductDetail>(`/admin/products/${id}/off-sale`, {
+    method: 'POST',
+    headers: {
+      'X-Admin-Confirm': 'true',
+      'X-Admin-Reason': reason
+    }
+  });
 }

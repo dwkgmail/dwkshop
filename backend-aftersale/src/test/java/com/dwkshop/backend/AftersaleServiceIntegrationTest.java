@@ -113,7 +113,9 @@ class AftersaleServiceIntegrationTest {
         assertThat(created.getRefundAmount()).isEqualTo(19900);
 
         mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test approval"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"))
             .andExpect(jsonPath("$.refundTime").doesNotExist());
@@ -130,6 +132,8 @@ class AftersaleServiceIntegrationTest {
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/fail", created.getId())
                 .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "Payment channel timeout")
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -146,7 +150,9 @@ class AftersaleServiceIntegrationTest {
         assertThat(flow.getLastError()).isEqualTo("Payment channel timeout");
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/retry", created.getId())
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test retry"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"))
             .andExpect(jsonPath("$.rejectReason").doesNotExist());
@@ -158,7 +164,9 @@ class AftersaleServiceIntegrationTest {
         assertThat(flow.getRetryCount()).isEqualTo(1);
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", created.getId())
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test complete"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
             .andExpect(jsonPath("$.refundTime").isNotEmpty());
@@ -205,12 +213,16 @@ class AftersaleServiceIntegrationTest {
         AftersaleOrder created = aftersaleOrderRepository.findAll().get(0);
 
         mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test approval"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
 
         mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test duplicate approval"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
 
@@ -259,7 +271,9 @@ class AftersaleServiceIntegrationTest {
         AftersaleOrder created = aftersaleOrderRepository.findAll().get(0);
 
         mockMvc.perform(post("/admin/aftersales/{id}/approve", created.getId())
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test return approval"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("WAIT_RETURN"));
 
@@ -275,7 +289,9 @@ class AftersaleServiceIntegrationTest {
         assertThat(outboxEventRepository.findAll()).hasSize(1);
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", created.getId())
-                .header("Authorization", "Bearer " + adminToken()))
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test complete"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
     }

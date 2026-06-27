@@ -3,6 +3,7 @@ package com.dwkshop.backend.auth;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 @Component
@@ -28,11 +29,12 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (token != null) {
             AuthPrincipal principal = tokenService.verify(token);
             if (path.startsWith("/admin/") && requiresAdminAccess(path) && !principal.isAdmin()) {
-                throw new AuthException("请先登录后台");
+                throw new AuthException("admin login required");
             }
+            verifyPermissionAndConfirmation(request, handler, principal);
             AuthContext.set(principal);
         } else if (path.startsWith("/admin/") && requiresAdminAccess(path)) {
-            throw new AuthException("请先登录后台");
+            throw new AuthException("admin login required");
         }
 
         return true;
@@ -66,5 +68,28 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (expectedSecret == null || expectedSecret.isBlank() || actualSecret == null || !expectedSecret.equals(actualSecret)) {
             throw new AuthException("internal access unauthorized");
         }
+    }
+
+    private void verifyPermissionAndConfirmation(HttpServletRequest request, Object handler, AuthPrincipal principal) {
+        if (!(handler instanceof HandlerMethod method) || !request.getRequestURI().startsWith("/admin/")) {
+            return;
+        }
+        RequiresPermission permission = annotation(method, RequiresPermission.class);
+        if (permission != null && !principal.hasPermission(permission.value())) {
+            throw new AuthException("admin permission denied");
+        }
+        RequiresConfirmation confirmation = annotation(method, RequiresConfirmation.class);
+        if (confirmation != null) {
+            String confirmed = request.getHeader("X-Admin-Confirm");
+            String reason = request.getHeader("X-Admin-Reason");
+            if (!"true".equalsIgnoreCase(confirmed) || reason == null || reason.isBlank()) {
+                throw new AuthException("high risk operation requires confirmation and reason");
+            }
+        }
+    }
+
+    private <T extends java.lang.annotation.Annotation> T annotation(HandlerMethod method, Class<T> type) {
+        T annotation = method.getMethodAnnotation(type);
+        return annotation != null ? annotation : method.getBeanType().getAnnotation(type);
     }
 }

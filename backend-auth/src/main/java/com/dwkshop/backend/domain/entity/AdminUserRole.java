@@ -15,26 +15,18 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "admin_role")
-public class AdminRole {
+@Table(name = "admin_user_role")
+public class AdminUserRole {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 64)
-    private String roleCode;
+    @Column(nullable = false)
+    private Long adminUserId;
 
-    @Column(nullable = false, length = 64)
-    private String roleName;
-
-    @Column(nullable = false, length = 500)
-    private String permissions;
-
-    @Column(nullable = false, length = 20)
-    private String status;
+    @Column(nullable = false)
+    private Long roleId;
 
     private LocalDateTime createdAt;
-
-    private LocalDateTime updatedAt;
 }

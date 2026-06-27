@@ -146,9 +146,10 @@ export function getAdminMembers() {
   return request<AdminMember[]>('/admin/users');
 }
 
-export function updateMemberStatus(id: number, status: string) {
+export function updateMemberStatus(id: number, status: string, reason: string) {
   return request<AdminMember>(`/admin/users/${id}/status`, {
     method: 'PATCH',
+    headers: confirmationHeaders(reason),
     body: JSON.stringify({ status })
   });
 }
@@ -179,16 +180,25 @@ export function getAdminAccounts() {
   return request<AdminAccount[]>('/admin/admin-users');
 }
 
-export function assignAdminRole(id: number, roleId: number) {
+function confirmationHeaders(reason: string) {
+  return {
+    'X-Admin-Confirm': 'true',
+    'X-Admin-Reason': reason
+  };
+}
+
+export function assignAdminRole(id: number, roleId: number, reason: string) {
   return request<AdminAccount>(`/admin/admin-users/${id}/role`, {
     method: 'PATCH',
+    headers: confirmationHeaders(reason),
     body: JSON.stringify({ roleId })
   });
 }
 
-export function updateAdminAccountStatus(id: number, status: string) {
+export function updateAdminAccountStatus(id: number, status: string, reason: string) {
   return request<AdminAccount>(`/admin/admin-users/${id}/status`, {
     method: 'PATCH',
+    headers: confirmationHeaders(reason),
     body: JSON.stringify({ status })
   });
 }
@@ -204,6 +214,7 @@ export function getInventoryReconciliation(onlyDiff = false) {
 export function repairInventoryLockedStock(skuId: number, reason: string) {
   return request<InventoryRepairRecord>(`/admin/inventory-reconciliation/skus/${skuId}/repair`, {
     method: 'POST',
+    headers: confirmationHeaders(reason),
     body: JSON.stringify({ operator: 'admin', reason })
   });
 }

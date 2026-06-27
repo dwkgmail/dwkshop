@@ -1,5 +1,7 @@
 package com.dwkshop.backend.aftersale;
 
+import com.dwkshop.backend.auth.RequiresConfirmation;
+import com.dwkshop.backend.auth.RequiresPermission;
 import com.dwkshop.backend.aftersale.dto.AftersaleResponse;
 import com.dwkshop.backend.aftersale.dto.RejectAftersaleRequest;
 import com.dwkshop.backend.aftersale.dto.RefundFailureRequest;
@@ -22,41 +24,53 @@ public class AdminAftersaleController {
     }
 
     @GetMapping
+    @RequiresPermission("aftersale:read")
     public List<AftersaleResponse> list() {
         return aftersaleService.listAdmin();
     }
 
     @PostMapping("/{id}/approve")
+    @RequiresPermission("aftersale:audit")
+    @RequiresConfirmation
     public AftersaleResponse approve(@PathVariable Long id) {
         return aftersaleService.approve(id);
     }
 
     @PostMapping("/{id}/return")
+    @RequiresPermission("aftersale:audit")
     public AftersaleResponse confirmReturned(@PathVariable Long id) {
         return aftersaleService.confirmReturned(id);
     }
 
     @PostMapping("/{id}/refund/complete")
+    @RequiresPermission("finance:refund")
+    @RequiresConfirmation
     public AftersaleResponse completeRefund(@PathVariable Long id) {
         return aftersaleService.completeRefund(id);
     }
 
     @PostMapping("/{id}/refund/fail")
+    @RequiresPermission("finance:refund")
+    @RequiresConfirmation
     public AftersaleResponse failRefund(@PathVariable Long id, @RequestBody(required = false) RefundFailureRequest request) {
         return aftersaleService.failRefund(id, request);
     }
 
     @PostMapping("/{id}/refund/retry")
+    @RequiresPermission("finance:refund")
+    @RequiresConfirmation
     public AftersaleResponse retryRefund(@PathVariable Long id) {
         return aftersaleService.retryRefund(id);
     }
 
     @PostMapping("/{id}/close")
+    @RequiresPermission("aftersale:audit")
     public AftersaleResponse close(@PathVariable Long id) {
         return aftersaleService.close(id);
     }
 
     @PostMapping("/{id}/reject")
+    @RequiresPermission("aftersale:audit")
     public AftersaleResponse reject(@PathVariable Long id, @RequestBody(required = false) RejectAftersaleRequest request) {
         return aftersaleService.reject(id, request);
     }

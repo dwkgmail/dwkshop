@@ -312,7 +312,13 @@ class BackendApplicationTests {
             .andExpect(jsonPath("$.amount.productAmount").value(229800))
             .andExpect(jsonPath("$.amount.couponDiscountAmount").value(10000))
             .andExpect(jsonPath("$.amount.pointDiscountAmount").value(50))
-            .andExpect(jsonPath("$.amount.payAmount").value(219750));
+            .andExpect(jsonPath("$.amount.payAmount").value(219750))
+            .andExpect(jsonPath("$.amount.promotionTraces[0].promotionType").value("COUPON"))
+            .andExpect(jsonPath("$.amount.promotionTraces[0].ruleId").value("1"))
+            .andExpect(jsonPath("$.amount.promotionTraces[1].promotionType").value("POINT"))
+            .andExpect(jsonPath("$.items[0].couponShareAmount").value(2606))
+            .andExpect(jsonPath("$.items[0].pointShareAmount").value(13))
+            .andExpect(jsonPath("$.items[0].promotionShares[0].discountAmount").value(2606));
 
         mockMvc.perform(post("/api/orders/confirm").contentType("application/json").content("""
             {"sourceType":"BUY_NOW","skuId":2,"quantity":1}
@@ -326,6 +332,44 @@ class BackendApplicationTests {
             """))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.pointDeduction.visible").value(false));
+    }
+
+    @Test
+    void createOrderPersistsPromotionTraceAndItemShares() throws Exception {
+        clearCart();
+        mockMvc.perform(post("/api/cart/items").contentType("application/json").content("""
+            {"skuId":1,"quantity":1}
+            """))
+            .andExpect(status().isOk());
+        mockMvc.perform(post("/api/cart/items").contentType("application/json").content("""
+            {"skuId":6,"quantity":1}
+            """))
+            .andExpect(status().isOk());
+
+        MvcResult confirm = mockMvc.perform(post("/api/orders/confirm").contentType("application/json").content("""
+            {"sourceType":"CART","usePoints":true}
+            """))
+            .andExpect(status().isOk())
+            .andReturn();
+        String token = com.jayway.jsonpath.JsonPath.read(confirm.getResponse().getContentAsString(), "$.settlementToken");
+
+        MvcResult created = mockMvc.perform(post("/api/orders/create").contentType("application/json").content("""
+            {"settlementToken":"%s","expectedPayAmount":219750}
+            """.formatted(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.amount.promotionTraces[0].promotionType").value("COUPON"))
+            .andExpect(jsonPath("$.amount.promotionTraces[0].ruleId").value("1"))
+            .andExpect(jsonPath("$.amount.promotionTraces[1].promotionType").value("POINT"))
+            .andExpect(jsonPath("$.items[0].promotionShares[0].promotionType").value("COUPON"))
+            .andExpect(jsonPath("$.items[0].promotionShares[1].promotionType").value("POINT"))
+            .andReturn();
+
+        Integer orderId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        String amountTrace = jdbcTemplate.queryForObject("select promotion_trace_json from trade_order_amount where order_id = ?", String.class, orderId);
+        String itemTrace = jdbcTemplate.queryForObject("select promotion_share_json from trade_order_item where order_id = ? order by id limit 1", String.class, orderId);
+        assertThat(amountTrace).contains("\"promotionType\":\"COUPON\"");
+        assertThat(amountTrace).contains("\"ruleId\":\"POINT_EXCHANGE_RATE_100\"");
+        assertThat(itemTrace).contains("\"promotionType\":\"POINT\"");
     }
 
     @Test

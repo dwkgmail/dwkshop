@@ -35,15 +35,23 @@ import com.dwkshop.backend.order.dto.OrderItemResponse;
 import com.dwkshop.backend.order.dto.OrderResponse;
 import com.dwkshop.backend.order.dto.OrderSummaryResponse;
 import com.dwkshop.backend.order.dto.PointDeductionResponse;
+import com.dwkshop.backend.order.dto.PromotionShareResponse;
+import com.dwkshop.backend.order.dto.PromotionTraceItemResponse;
+import com.dwkshop.backend.order.dto.PromotionTraceResponse;
 import com.dwkshop.backend.product.PriceFormatter;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
@@ -79,6 +87,7 @@ public class OrderService {
     private final TradeOrderAmountRepository tradeOrderAmountRepository;
     private final SettlementSessionStore settlementSessionStore;
     private final ApplicationEventPublisher eventPublisher;
+    private final ObjectMapper objectMapper;
     private final Duration settlementTtl;
 
     public OrderService(
@@ -95,6 +104,7 @@ public class OrderService {
         TradeOrderAmountRepository tradeOrderAmountRepository,
         SettlementSessionStore settlementSessionStore,
         ApplicationEventPublisher eventPublisher,
+        ObjectMapper objectMapper,
         @Value("${dwkshop.order.settlement-ttl-minutes:30}") long settlementTtlMinutes
     ) {
         this.cartItemRepository = cartItemRepository;
@@ -110,6 +120,7 @@ public class OrderService {
         this.tradeOrderAmountRepository = tradeOrderAmountRepository;
         this.settlementSessionStore = settlementSessionStore;
         this.eventPublisher = eventPublisher;
+        this.objectMapper = objectMapper;
         this.settlementTtl = Duration.ofMinutes(settlementTtlMinutes);
     }
 
@@ -288,7 +299,8 @@ public class OrderService {
         PointSelection pointSelection = selectPoints(userId, request.usePoints(), items, productAmount - productDiscountAmount - couponSelection.discountAmount());
         int payAmount = productAmount - productDiscountAmount - couponSelection.discountAmount() - pointSelection.deductionAmount() + freightAmount;
         payAmount = Math.max(payAmount, 0);
-        OrderAmountResponse amount = toAmount(productAmount, productDiscountAmount, couponSelection.discountAmount(), pointSelection.deductionAmount(), freightAmount, 0, payAmount);
+        List<PromotionTraceResponse> promotionTraces = buildPromotionTraces(userId, items, couponSelection, pointSelection);
+        OrderAmountResponse amount = toAmount(productAmount, productDiscountAmount, couponSelection.discountAmount(), pointSelection.deductionAmount(), freightAmount, 0, payAmount, promotionTraces, writePromotionJson(promotionTraces));
         return new SettlementCalculation(sourceType, address, items, couponSelection.selectedCouponUser(), couponSelection.availableCoupons(), pointSelection, amount);
     }
 
@@ -400,7 +412,13 @@ public class OrderService {
         List<ConfirmCouponResponse> responses = candidates.stream()
             .map(candidate -> toCouponResponse(candidate.userCoupon(), candidate.coupon(), finalSelected != null && finalSelected.userCoupon().getId().equals(candidate.userCoupon().getId())))
             .toList();
-        return new CouponSelection(selected == null ? null : selected.userCoupon(), responses, selected == null ? 0 : selected.coupon().getDiscountAmount());
+        return new CouponSelection(
+            selected == null ? null : selected.userCoupon(),
+            responses,
+            selected == null ? 0 : selected.coupon().getDiscountAmount(),
+            selected == null ? null : selected.coupon().getId(),
+            selected == null ? null : selected.coupon().getName()
+        );
     }
 
     private PointSelection selectPoints(Long userId, Boolean usePoints, List<SettlementItem> items, int remainingAmount) {
@@ -476,6 +494,7 @@ public class OrderService {
             orderItem.setCouponShareAmount(refundSnapshot.couponShareAmount());
             orderItem.setPointShareAmount(refundSnapshot.pointShareAmount());
             orderItem.setFreightShareAmount(refundSnapshot.freightShareAmount());
+            orderItem.setPromotionShareJson(writePromotionJson(promotionSharesForIndex(calculation.amount().promotionTraces(), index)));
             orderItem.setDeliveryType(item.product().getDeliveryType());
             orderItem.setSupportRefund(defaultBool(item.product().getSupportRefund(), true));
             orderItem.setSupportPointDeduction(defaultBool(item.product().getSupportPointDeduction(), false));
@@ -499,6 +518,7 @@ public class OrderService {
         amount.setFreightAmount(calculation.amount().freightAmount());
         amount.setFreightDiscountAmount(calculation.amount().freightDiscountAmount());
         amount.setPayAmount(calculation.amount().payAmount());
+        amount.setPromotionTraceJson(calculation.amount().promotionTraceJson());
         amount.setCreatedAt(now);
         tradeOrderAmountRepository.save(amount);
 
@@ -588,7 +608,7 @@ public class OrderService {
             token,
             calculation.sourceType(),
             toAddress(calculation.address()),
-            calculation.items().stream().map(this::toConfirmItem).toList(),
+            toConfirmItems(calculation),
             calculation.amount().freightAmount(),
             PriceFormatter.formatCents(calculation.amount().freightAmount()),
             calculation.availableCoupons().stream().filter(ConfirmCouponResponse::selected).findFirst().orElse(null),
@@ -605,7 +625,18 @@ public class OrderService {
         );
     }
 
-    private ConfirmOrderItemResponse toConfirmItem(SettlementItem item) {
+    private List<ConfirmOrderItemResponse> toConfirmItems(SettlementCalculation calculation) {
+        List<ItemRefundSnapshot> refundSnapshots = buildRefundSnapshots(calculation);
+        return IntStream.range(0, calculation.items().size())
+            .mapToObj(index -> toConfirmItem(
+                calculation.items().get(index),
+                refundSnapshots.get(index),
+                promotionSharesForIndex(calculation.amount().promotionTraces(), index)
+            ))
+            .toList();
+    }
+
+    private ConfirmOrderItemResponse toConfirmItem(SettlementItem item, ItemRefundSnapshot refundSnapshot, List<PromotionShareResponse> promotionShares) {
         ProductNotice notice = item.notice();
         return new ConfirmOrderItemResponse(
             item.cartItemId(),
@@ -619,6 +650,15 @@ public class OrderService {
             item.quantity(),
             item.totalAmount(),
             PriceFormatter.formatCents(item.totalAmount()),
+            refundSnapshot.couponShareAmount(),
+            PriceFormatter.formatCents(refundSnapshot.couponShareAmount()),
+            refundSnapshot.pointShareAmount(),
+            PriceFormatter.formatCents(refundSnapshot.pointShareAmount()),
+            refundSnapshot.freightShareAmount(),
+            PriceFormatter.formatCents(refundSnapshot.freightShareAmount()),
+            refundSnapshot.itemPayAmount() + refundSnapshot.freightShareAmount(),
+            PriceFormatter.formatCents(refundSnapshot.itemPayAmount() + refundSnapshot.freightShareAmount()),
+            promotionShares,
             item.product().getAllowSingleBuy(),
             item.product().getSupportPointDeduction(),
             notice == null ? null : notice.getNoticeTitle(),
@@ -666,7 +706,7 @@ public class OrderService {
             order.getDeliveryTime(),
             order.getFinishTime(),
             order.getCreatedAt(),
-            amount == null ? null : toAmount(amount.getProductAmount(), amount.getActivityDiscountAmount(), amount.getCouponDiscountAmount(), amount.getPointDiscountAmount(), amount.getFreightAmount(), amount.getFreightDiscountAmount(), amount.getPayAmount()),
+            amount == null ? null : toAmount(amount.getProductAmount(), amount.getActivityDiscountAmount(), amount.getCouponDiscountAmount(), amount.getPointDiscountAmount(), amount.getFreightAmount(), amount.getFreightDiscountAmount(), amount.getPayAmount(), readPromotionTraces(amount.getPromotionTraceJson()), amount.getPromotionTraceJson()),
             items.stream().map(this::toOrderItem).toList()
         );
     }
@@ -687,6 +727,13 @@ public class OrderService {
             item.getQuantity(),
             item.getPayAmount(),
             PriceFormatter.formatCents(item.getPayAmount()),
+            item.getCouponShareAmount(),
+            PriceFormatter.formatCents(item.getCouponShareAmount()),
+            item.getPointShareAmount(),
+            PriceFormatter.formatCents(item.getPointShareAmount()),
+            item.getFreightShareAmount(),
+            PriceFormatter.formatCents(item.getFreightShareAmount()),
+            readPromotionShares(item.getPromotionShareJson()),
             item.getDeliveryType(),
             item.getSupportRefund(),
             item.getSupportPointDeduction(),
@@ -721,7 +768,92 @@ public class OrderService {
         );
     }
 
-    private OrderAmountResponse toAmount(int productAmount, int productDiscountAmount, int couponDiscountAmount, int pointDiscountAmount, int freightAmount, int freightDiscountAmount, int payAmount) {
+    private List<PromotionTraceResponse> buildPromotionTraces(Long userId, List<SettlementItem> items, CouponSelection couponSelection, PointSelection pointSelection) {
+        List<PromotionTraceResponse> traces = new ArrayList<>();
+        if (couponSelection.discountAmount() > 0) {
+            traces.add(new PromotionTraceResponse(
+                "COUPON",
+                couponSelection.selectedCouponUser() == null ? null : couponSelection.selectedCouponUser().getId().toString(),
+                couponSelection.couponId() == null ? null : couponSelection.couponId().toString(),
+                couponSelection.name() == null ? "Coupon discount" : couponSelection.name(),
+                couponSelection.discountAmount(),
+                PriceFormatter.formatCents(couponSelection.discountAmount()),
+                traceItems(items, allocateByProductAmount(items, couponSelection.discountAmount()))
+            ));
+        }
+        if (pointSelection.deductionAmount() > 0) {
+            traces.add(new PromotionTraceResponse(
+                "POINT",
+                "USER_POINTS:" + userId,
+                "POINT_EXCHANGE_RATE_" + POINT_EXCHANGE_RATE,
+                "Point deduction",
+                pointSelection.deductionAmount(),
+                PriceFormatter.formatCents(pointSelection.deductionAmount()),
+                traceItems(items, allocateByProductAmount(items, pointSelection.deductionAmount()))
+            ));
+        }
+        return traces;
+    }
+
+    private List<PromotionTraceItemResponse> traceItems(List<SettlementItem> items, List<Integer> shares) {
+        return IntStream.range(0, items.size())
+            .mapToObj(index -> new PromotionTraceItemResponse(
+                items.get(index).cartItemId(),
+                items.get(index).product().getId(),
+                items.get(index).sku().getId(),
+                shares.get(index),
+                PriceFormatter.formatCents(shares.get(index))
+            ))
+            .toList();
+    }
+
+    private List<PromotionShareResponse> promotionSharesForIndex(List<PromotionTraceResponse> traces, int index) {
+        if (traces == null || traces.isEmpty()) {
+            return List.of();
+        }
+        return traces.stream()
+            .filter(trace -> trace.items() != null && trace.items().size() > index && trace.items().get(index).shareAmount() > 0)
+            .map(trace -> new PromotionShareResponse(
+                trace.promotionType(),
+                trace.sourceId(),
+                trace.ruleId(),
+                trace.name(),
+                trace.items().get(index).shareAmount(),
+                trace.items().get(index).shareAmountText()
+            ))
+            .toList();
+    }
+
+    private String writePromotionJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value == null ? List.of() : value);
+        } catch (JsonProcessingException ex) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Promotion trace serialization failed", ex);
+        }
+    }
+
+    private List<PromotionTraceResponse> readPromotionTraces(String value) {
+        return readPromotionJson(value, new TypeReference<List<PromotionTraceResponse>>() {
+        });
+    }
+
+    private List<PromotionShareResponse> readPromotionShares(String value) {
+        return readPromotionJson(value, new TypeReference<List<PromotionShareResponse>>() {
+        });
+    }
+
+    private <T> List<T> readPromotionJson(String value, TypeReference<List<T>> typeReference) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(value, typeReference);
+        } catch (JsonProcessingException ex) {
+            return List.of();
+        }
+    }
+
+    private OrderAmountResponse toAmount(int productAmount, int productDiscountAmount, int couponDiscountAmount, int pointDiscountAmount, int freightAmount, int freightDiscountAmount, int payAmount, List<PromotionTraceResponse> promotionTraces, String promotionTraceJson) {
         return new OrderAmountResponse(
             productAmount,
             PriceFormatter.formatCents(productAmount),
@@ -736,7 +868,9 @@ public class OrderService {
             freightDiscountAmount,
             PriceFormatter.formatCents(freightDiscountAmount),
             payAmount,
-            PriceFormatter.formatCents(payAmount)
+            PriceFormatter.formatCents(payAmount),
+            promotionTraces == null ? List.of() : promotionTraces,
+            promotionTraceJson == null ? "[]" : promotionTraceJson
         );
     }
 
@@ -796,7 +930,7 @@ public class OrderService {
     private record CouponCandidate(CouponUser userCoupon, Coupon coupon) {
     }
 
-    private record CouponSelection(CouponUser selectedCouponUser, List<ConfirmCouponResponse> availableCoupons, int discountAmount) {
+    private record CouponSelection(CouponUser selectedCouponUser, List<ConfirmCouponResponse> availableCoupons, int discountAmount, Long couponId, String name) {
     }
 
     private record PointSelection(boolean visible, int availablePoints, int deductionAmount, boolean selected) {

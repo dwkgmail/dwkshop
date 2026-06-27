@@ -1,5 +1,32 @@
 import { request } from './client';
 
+export interface PromotionTraceItem {
+  cartItemId?: number;
+  productId: number;
+  skuId: number;
+  shareAmount: number;
+  shareAmountText: string;
+}
+
+export interface PromotionTrace {
+  promotionType: string;
+  sourceId?: string;
+  ruleId?: string;
+  name: string;
+  discountAmount: number;
+  discountAmountText: string;
+  items: PromotionTraceItem[];
+}
+
+export interface PromotionShare {
+  promotionType: string;
+  sourceId?: string;
+  ruleId?: string;
+  name: string;
+  discountAmount: number;
+  discountAmountText: string;
+}
+
 export interface ConfirmOrderItem {
   cartItemId?: number;
   productId: number;
@@ -12,6 +39,15 @@ export interface ConfirmOrderItem {
   quantity: number;
   totalAmount: number;
   totalAmountText: string;
+  couponShareAmount: number;
+  couponShareAmountText: string;
+  pointShareAmount: number;
+  pointShareAmountText: string;
+  freightShareAmount: number;
+  freightShareAmountText: string;
+  payAmount: number;
+  payAmountText: string;
+  promotionShares: PromotionShare[];
   allowSingleBuy: boolean;
   pointDeductEnabled: boolean;
   noticeTitle?: string;
@@ -44,6 +80,8 @@ export interface OrderAmount {
   freightDiscountAmountText: string;
   payAmount: number;
   payAmountText: string;
+  promotionTraces: PromotionTrace[];
+  promotionTraceJson: string;
 }
 
 export interface ConfirmCoupon {
@@ -112,6 +150,13 @@ export interface OrderDetail extends OrderSummary {
     quantity: number;
     payAmount: number;
     payAmountText: string;
+    couponShareAmount: number;
+    couponShareAmountText: string;
+    pointShareAmount: number;
+    pointShareAmountText: string;
+    freightShareAmount: number;
+    freightShareAmountText: string;
+    promotionShares: PromotionShare[];
     refundableQuantity: number;
     refundedQuantity: number;
     aftersaleQuantity: number;

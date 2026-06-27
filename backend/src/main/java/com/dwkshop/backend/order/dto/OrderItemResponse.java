@@ -1,5 +1,7 @@
 package com.dwkshop.backend.order.dto;
 
+import java.util.List;
+
 public record OrderItemResponse(
     Long id,
     Long productId,
@@ -15,6 +17,13 @@ public record OrderItemResponse(
     Integer quantity,
     Integer payAmount,
     String payAmountText,
+    Integer couponShareAmount,
+    String couponShareAmountText,
+    Integer pointShareAmount,
+    String pointShareAmountText,
+    Integer freightShareAmount,
+    String freightShareAmountText,
+    List<PromotionShareResponse> promotionShares,
     String deliveryType,
     Boolean supportRefund,
     Boolean supportPointDeduction,

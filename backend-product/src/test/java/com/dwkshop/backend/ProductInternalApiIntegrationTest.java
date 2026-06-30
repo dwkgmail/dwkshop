@@ -1,15 +1,19 @@
 package com.dwkshop.backend;
 
 import com.dwkshop.backend.domain.entity.Product;
+import com.dwkshop.backend.domain.entity.ProductCategory;
 import com.dwkshop.backend.domain.entity.ProductNotice;
 import com.dwkshop.backend.domain.entity.ProductRefundCommand;
 import com.dwkshop.backend.domain.entity.ProductSku;
+import com.dwkshop.backend.domain.repository.ProductCategoryRepository;
 import com.dwkshop.backend.domain.repository.ProductNoticeRepository;
 import com.dwkshop.backend.domain.repository.ProductRefundCommandRepository;
 import com.dwkshop.backend.domain.repository.ProductRepository;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.auth.InternalServiceAuthConfig;
 import com.dwkshop.backend.product.ProductService;
+import com.dwkshop.backend.product.dto.ProductSkuRequest;
+import com.dwkshop.backend.product.dto.ProductUpsertRequest;
 import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -43,6 +47,7 @@ class ProductInternalApiIntegrationTest {
     private final MockMvc mockMvc;
     private final ProductRepository productRepository;
     private final ProductSkuRepository productSkuRepository;
+    private final ProductCategoryRepository productCategoryRepository;
     private final ProductNoticeRepository productNoticeRepository;
     private final ProductRefundCommandRepository productRefundCommandRepository;
     private final ProductService productService;
@@ -55,6 +60,7 @@ class ProductInternalApiIntegrationTest {
         MockMvc mockMvc,
         ProductRepository productRepository,
         ProductSkuRepository productSkuRepository,
+        ProductCategoryRepository productCategoryRepository,
         ProductNoticeRepository productNoticeRepository,
         ProductRefundCommandRepository productRefundCommandRepository,
         ProductService productService
@@ -62,6 +68,7 @@ class ProductInternalApiIntegrationTest {
         this.mockMvc = mockMvc;
         this.productRepository = productRepository;
         this.productSkuRepository = productSkuRepository;
+        this.productCategoryRepository = productCategoryRepository;
         this.productNoticeRepository = productNoticeRepository;
         this.productRefundCommandRepository = productRefundCommandRepository;
         this.productService = productService;
@@ -73,6 +80,7 @@ class ProductInternalApiIntegrationTest {
         productNoticeRepository.deleteAllInBatch();
         productSkuRepository.deleteAllInBatch();
         productRepository.deleteAllInBatch();
+        productCategoryRepository.deleteAllInBatch();
     }
 
     @Test
@@ -222,6 +230,48 @@ class ProductInternalApiIntegrationTest {
         ));
     }
 
+    @Test
+    void adminUpdateProductCanReuseExistingSkuCode() {
+        SeededProduct seededProduct = seedProduct("Product Editable", "SKU-EDITABLE", 8800, 10, 0, true, true);
+
+        productService.updateProduct(seededProduct.productId(), new ProductUpsertRequest(
+            seededProduct.categoryId(),
+            "P-PRODUCT-EDITABLE",
+            "Product Editable Updated",
+            "Brand",
+            "Updated subtitle",
+            "/images/product-editable.png",
+            "NORMAL",
+            "ON_SALE",
+            "NORMAL",
+            true,
+            true,
+            true,
+            true,
+            false,
+            0,
+            3,
+            "Buyer Guide",
+            "Updated notice.",
+            List.of(new ProductSkuRequest(
+                "SKU-SKU-EDITABLE",
+                "SKU-EDITABLE",
+                "{\"color\":\"black\"}",
+                "/images/sku-editable.png",
+                9900,
+                10900,
+                12,
+                "ENABLED"
+            ))
+        ));
+
+        List<ProductSku> skus = productSkuRepository.findByProductId(seededProduct.productId());
+        assertThat(skus).hasSize(1);
+        assertThat(skus.get(0).getSkuCode()).isEqualTo("SKU-SKU-EDITABLE");
+        assertThat(skus.get(0).getSalePrice()).isEqualTo(9900);
+        assertThat(skus.get(0).getStock()).isEqualTo(12);
+    }
+
     private SeededProduct seedProduct(
         String productName,
         String skuName,
@@ -233,8 +283,17 @@ class ProductInternalApiIntegrationTest {
     ) {
         LocalDateTime now = LocalDateTime.of(2026, 6, 18, 10, 0);
 
+        ProductCategory category = new ProductCategory();
+        category.setName(productName + " Category");
+        category.setLevel(1);
+        category.setSortOrder(1);
+        category.setStatus("ENABLED");
+        category.setCreatedAt(now);
+        category.setUpdatedAt(now);
+        ProductCategory savedCategory = productCategoryRepository.save(category);
+
         Product product = new Product();
-        product.setCategoryId(1L);
+        product.setCategoryId(savedCategory.getId());
         product.setProductCode("P-" + productName.replace(" ", "-").toUpperCase());
         product.setName(productName);
         product.setSubtitle("Subtitle");
@@ -278,9 +337,9 @@ class ProductInternalApiIntegrationTest {
         notice.setUpdatedAt(now);
         productNoticeRepository.save(notice);
 
-        return new SeededProduct(savedProduct.getId(), savedSku.getId());
+        return new SeededProduct(savedProduct.getId(), savedSku.getId(), savedCategory.getId());
     }
 
-    private record SeededProduct(Long productId, Long skuId) {
+    private record SeededProduct(Long productId, Long skuId, Long categoryId) {
     }
 }

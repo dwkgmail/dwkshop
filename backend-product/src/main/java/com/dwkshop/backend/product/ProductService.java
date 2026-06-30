@@ -240,6 +240,7 @@ public class ProductService {
         applyProductRequest(product, request, now, false);
         Product saved = productRepository.save(product);
         productSkuRepository.deleteByProductId(saved.getId());
+        productSkuRepository.flush();
         List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
         ProductNotice notice = saveNotice(saved.getId(), request.noticeTitle(), request.noticeContent(), now);
         productSearchGateway.indexProduct(saved);

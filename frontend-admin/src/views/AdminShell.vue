@@ -73,6 +73,12 @@ const loading = ref(false);
 const error = ref('');
 const toast = ref('');
 const showPasswordPanel = ref(false);
+const adminModuleUnavailable = reactive({
+  users: false,
+  coupons: false,
+  permissions: false
+});
+const adminModuleUnavailableText = '该模块尚未接入微服务，暂不可用';
 
 const loginForm = reactive({ username: 'admin', password: 'admin123' });
 const passwordForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' });
@@ -225,8 +231,8 @@ const dashboard = computed(() => {
     payAmountText: formatCents(payAmount),
     waitShip: orders.value.filter((item) => item.orderStatus === 'WAIT_SHIP').length,
     refundApplying: aftersales.value.filter((item) => ['APPLYING', 'WAIT_RETURN', 'REFUNDING', 'REFUND_FAILED'].includes(item.aftersaleStatus)).length,
-    couponEnabled: coupons.value.filter((item) => item.couponStatus === 'ENABLED').length,
-    activeMembers: members.value.filter((item) => item.status === 'ACTIVE').length
+    couponEnabled: '-',
+    activeMembers: '-'
   };
 });
 
@@ -263,6 +269,22 @@ function formatLogValue(value?: string | null) {
   if (!value) return '-';
   const compact = value.replace(/\s+/g, ' ').trim();
   return compact.length > 80 ? `${compact.slice(0, 80)}...` : compact;
+}
+
+function isNotFoundError(err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  return /(^|[^0-9])404([^0-9]|$)|not found/i.test(message);
+}
+
+async function loadOptionalAdminModule(module: keyof typeof adminModuleUnavailable, task: () => Promise<void>, reset: () => void) {
+  try {
+    await task();
+    adminModuleUnavailable[module] = false;
+  } catch (err) {
+    if (!isNotFoundError(err)) throw err;
+    reset();
+    adminModuleUnavailable[module] = true;
+  }
 }
 
 function showToast(message: string) {
@@ -378,7 +400,7 @@ function nav(key: string) {
 
 async function loadDashboard() {
   await runTask(async () => {
-    await Promise.all([loadProductsQuietly(), loadOrdersQuietly(), loadAftersalesQuietly(), loadMembersQuietly(), loadCouponsQuietly()]);
+    await Promise.all([loadProductsQuietly(), loadOrdersQuietly(), loadAftersalesQuietly()]);
   });
 }
 
@@ -397,16 +419,33 @@ async function loadAftersales() {
 }
 
 async function loadMembers() {
-  await runTask(loadMembersQuietly);
+  await runTask(async () => {
+    await loadOptionalAdminModule('users', loadMembersQuietly, () => {
+      members.value = [];
+    });
+  });
 }
 
 async function loadCoupons() {
-  await runTask(loadCouponsQuietly);
+  await runTask(async () => {
+    await loadOptionalAdminModule('coupons', loadCouponsQuietly, () => {
+      coupons.value = [];
+    });
+  });
 }
 
 async function loadPermissions() {
   await runTask(async () => {
-    await Promise.all([loadRolesQuietly(), loadAdminAccountsQuietly()]);
+    await loadOptionalAdminModule(
+      'permissions',
+      async () => {
+        await Promise.all([loadRolesQuietly(), loadAdminAccountsQuietly()]);
+      },
+      () => {
+        roles.value = [];
+        adminAccounts.value = [];
+      }
+    );
   });
 }
 
@@ -909,7 +948,7 @@ onUnmounted(() => {
             <div class="quick-actions">
               <button type="button" @click="openCreateProduct">新增商品</button>
               <button type="button" @click="nav('aftersale')">售后审核</button>
-              <button type="button" @click="openCreateCoupon">新增优惠券</button>
+              <button type="button" @click="nav('coupons')">优惠券管理</button>
               <button type="button" @click="nav('logs')">操作日志</button>
             </div>
           </div>
@@ -1075,8 +1114,9 @@ onUnmounted(() => {
             <option value="ENABLED">启用</option>
             <option value="DISABLED">停用</option>
           </select>
-          <button class="primary" type="button" @click="openCreateCoupon">新增优惠券</button>
+          <button class="primary" type="button" :disabled="adminModuleUnavailable.coupons" @click="openCreateCoupon">新增优惠券</button>
         </section>
+        <section v-if="adminModuleUnavailable.coupons" class="panel empty">{{ adminModuleUnavailableText }}</section>
         <section class="panel table-panel">
           <table>
             <thead><tr><th>优惠券</th><th>门槛</th><th>优惠</th><th>库存</th><th>已领 / 已用</th><th>领取时间</th><th>状态</th><th>操作</th></tr></thead>
@@ -1093,7 +1133,7 @@ onUnmounted(() => {
               </tr>
             </tbody>
           </table>
-          <div v-if="filteredCoupons.length === 0" class="empty">暂无优惠券</div>
+          <div v-if="filteredCoupons.length === 0 && !adminModuleUnavailable.coupons" class="empty">暂无优惠券</div>
         </section>
       </section>
 
@@ -1126,6 +1166,7 @@ onUnmounted(() => {
           </select>
           <button class="primary" type="button" @click="loadMembers">刷新</button>
         </section>
+        <section v-if="adminModuleUnavailable.users" class="panel empty">{{ adminModuleUnavailableText }}</section>
         <section class="panel table-panel">
           <table>
             <thead><tr><th>用户</th><th>手机号</th><th>积分</th><th>订单数</th><th>优惠券数</th><th>注册时间</th><th>状态</th><th>操作</th></tr></thead>
@@ -1142,11 +1183,12 @@ onUnmounted(() => {
               </tr>
             </tbody>
           </table>
-          <div v-if="filteredMembers.length === 0" class="empty">暂无用户</div>
+          <div v-if="filteredMembers.length === 0 && !adminModuleUnavailable.users" class="empty">暂无用户</div>
         </section>
       </section>
 
       <section v-else-if="page === 'permissions'" class="page">
+        <section v-if="adminModuleUnavailable.permissions" class="panel empty">{{ adminModuleUnavailableText }}</section>
         <section class="dashboard-grid">
           <section class="panel table-panel">
             <div class="section-heading"><h2>角色</h2><button class="ghost" type="button" @click="loadPermissions">刷新</button></div>

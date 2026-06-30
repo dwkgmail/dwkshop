@@ -14,7 +14,7 @@ spring:
         - id: product-service
           uri: ${DWKSHOP_PRODUCT_SERVICE_URI:http://localhost:18082}
           predicates:
-            - Path=/api/products/**,/api/categories/**,/api/search/products,/admin/products/**
+            - Path=/api/products/**,/api/categories/**,/api/search/products,/admin/products/**,/admin/inventory-reconciliation,/admin/inventory-reconciliation/**
         - id: cart-service
           uri: ${DWKSHOP_CART_SERVICE_URI:http://localhost:18083}
           predicates:

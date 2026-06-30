@@ -28,5 +28,13 @@ class GatewayRouteExposureTest {
                 .isNotEqualTo("/**"));
         assertThat(routes).extracting(RouteDefinition::getId)
             .contains("auth-service", "product-service", "order-service", "aftersale-service");
+        RouteDefinition productRoute = routes.stream()
+            .filter(route -> "product-service".equals(route.getId()))
+            .findFirst()
+            .orElseThrow();
+        assertThat(productRoute.getPredicates().stream()
+            .flatMap(predicate -> predicate.getArgs().values().stream())
+            .toList())
+            .contains("/admin/inventory-reconciliation", "/admin/inventory-reconciliation/**");
     }
 }

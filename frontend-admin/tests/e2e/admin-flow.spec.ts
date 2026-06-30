@@ -124,9 +124,10 @@ function shippedOrder() {
 async function mockAdminApi(page: Page, seen: Request[], options: { couponStatus?: number } = {}) {
   const handler = async (route: Route) => {
     const request = route.request();
-    seen.push(request);
     const url = new URL(request.url());
     const method = request.method();
+    if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/admin/')) return route.fallback();
+    seen.push(request);
 
     if (url.pathname === '/admin/auth/login' && method === 'POST') {
       return json(route, {
@@ -164,7 +165,7 @@ async function mockAdminApi(page: Page, seen: Request[], options: { couponStatus
       ]);
     }
     if (url.pathname === '/admin/coupons' && method === 'GET') {
-      if (options.couponStatus) return json(route, { message: 'module missing' }, options.couponStatus);
+      if (options.couponStatus) return json(route, { message: 'not found' }, options.couponStatus);
       return json(route, [
         {
           id: 4,

@@ -148,9 +148,10 @@ async function json(route: Route, body: unknown, status = 200) {
 async function mockBuyerApi(page: Page, seen: Request[]) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
-    seen.push(request);
     const url = new URL(request.url());
     const method = request.method();
+    if (!url.pathname.startsWith('/api/')) return route.fallback();
+    seen.push(request);
 
     if (url.pathname === '/api/products' && method === 'GET') return json(route, [product]);
     if (url.pathname === `/api/products/${product.id}` && method === 'GET') return json(route, product);

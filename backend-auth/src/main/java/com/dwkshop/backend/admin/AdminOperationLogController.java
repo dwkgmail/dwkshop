@@ -2,6 +2,7 @@ package com.dwkshop.backend.admin;
 
 import com.dwkshop.backend.audit.AdminOperationLogService;
 import com.dwkshop.backend.audit.dto.AdminOperationLogResponse;
+import com.dwkshop.backend.auth.RequiresPermission;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,6 +19,7 @@ public class AdminOperationLogController {
     }
 
     @GetMapping("/operation-logs")
+    @RequiresPermission("log:read")
     public List<AdminOperationLogResponse> operationLogs() {
         return operationLogService.listRecent();
     }

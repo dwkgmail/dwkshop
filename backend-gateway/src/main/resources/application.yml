@@ -10,7 +10,7 @@ spring:
         - id: auth-service
           uri: ${DWKSHOP_AUTH_SERVICE_URI:http://localhost:18081}
           predicates:
-            - Path=/api/auth/**,/admin/auth/**,/admin/operation-logs,/api/health
+            - Path=/api/auth/**,/admin/auth/**,/admin/users/**,/admin/roles,/admin/admin-users/**,/admin/operation-logs,/api/health
         - id: product-service
           uri: ${DWKSHOP_PRODUCT_SERVICE_URI:http://localhost:18082}
           predicates:

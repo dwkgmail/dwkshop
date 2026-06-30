@@ -36,5 +36,13 @@ class GatewayRouteExposureTest {
             .flatMap(predicate -> predicate.getArgs().values().stream())
             .toList())
             .contains("/admin/inventory-reconciliation", "/admin/inventory-reconciliation/**");
+        RouteDefinition authRoute = routes.stream()
+            .filter(route -> "auth-service".equals(route.getId()))
+            .findFirst()
+            .orElseThrow();
+        assertThat(authRoute.getPredicates().stream()
+            .flatMap(predicate -> predicate.getArgs().values().stream())
+            .toList())
+            .contains("/admin/users/**", "/admin/roles", "/admin/admin-users/**", "/admin/operation-logs");
     }
 }

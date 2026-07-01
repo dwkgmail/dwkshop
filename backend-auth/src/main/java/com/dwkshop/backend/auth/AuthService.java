@@ -140,8 +140,9 @@ public class AuthService {
     }
 
     private LoginResponse toResponse(Long id, String subject, String name, String role, Collection<String> permissions) {
-        String token = tokenService.issue(id, subject, role, permissions);
-        String refreshToken = tokenService.issueRefresh(id, subject, role, permissions);
+        String tokenRole = "USER".equals(role) ? "USER" : "ADMIN";
+        String token = tokenService.issue(id, subject, tokenRole, permissions);
+        String refreshToken = tokenService.issueRefresh(id, subject, tokenRole, permissions);
         return new LoginResponse(token, refreshToken, "Bearer", ttlSeconds, id, name, role);
     }
 

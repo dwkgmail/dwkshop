@@ -2,8 +2,10 @@ package com.dwkshop.backend.member;
 
 import com.dwkshop.backend.member.dto.MemberAddressResponse;
 import com.dwkshop.backend.member.dto.MemberPointAccountResponse;
+import com.dwkshop.backend.member.dto.MemberPointAccountSnapshotResponse;
 import com.dwkshop.backend.member.dto.MemberPointCommandRequest;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,6 +34,11 @@ public class MemberInternalController {
     @GetMapping("/{userId}/point-account")
     public MemberPointAccountResponse getPointAccount(@PathVariable Long userId) {
         return memberService.getPointAccount(userId);
+    }
+
+    @GetMapping("/point-accounts")
+    public List<MemberPointAccountSnapshotResponse> listPointAccounts(@RequestParam List<Long> userIds) {
+        return memberService.listPointAccounts(userIds);
     }
 
     @PostMapping("/{userId}/points/freeze")

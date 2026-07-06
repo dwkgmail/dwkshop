@@ -32,6 +32,7 @@ import com.dwkshop.backend.order.dto.PointDeductionResponse;
 import com.dwkshop.backend.order.dto.PromotionShareResponse;
 import com.dwkshop.backend.order.dto.PromotionTraceItemResponse;
 import com.dwkshop.backend.order.dto.PromotionTraceResponse;
+import com.dwkshop.backend.order.dto.UserOrderCountResponse;
 import com.dwkshop.backend.util.PriceFormatter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -518,6 +519,14 @@ public class OrderService {
             PageRequest.of(0, 100)
         );
         return new InventoryOrderHealth(pendingOutboxBacklog, staleWaitPayOrderIds);
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserOrderCountResponse> countOrdersByUsers(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        return tradeOrderRepository.countByUserIds(userIds);
     }
 
     @Transactional

@@ -11,8 +11,11 @@ import com.dwkshop.backend.domain.repository.UserPointAccountRepository;
 import com.dwkshop.backend.domain.repository.UserPointFlowRepository;
 import com.dwkshop.backend.member.dto.MemberAddressResponse;
 import com.dwkshop.backend.member.dto.MemberPointAccountResponse;
+import com.dwkshop.backend.member.dto.MemberPointAccountSnapshotResponse;
 import com.dwkshop.backend.member.dto.MemberPointCommandRequest;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,6 +61,20 @@ public class MemberService {
     public MemberPointAccountResponse getPointAccount(Long userId) {
         UserPointAccount account = userPointAccountRepository.findByUserId(userId).orElse(null);
         return new MemberPointAccountResponse(userId, account == null ? 0 : account.getAvailablePoints());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MemberPointAccountSnapshotResponse> listPointAccounts(Collection<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        return userPointAccountRepository.findByUserIdIn(userIds).stream()
+            .map(account -> new MemberPointAccountSnapshotResponse(
+                account.getUserId(),
+                account.getAvailablePoints(),
+                account.getLockedPoints()
+            ))
+            .toList();
     }
 
     @Transactional

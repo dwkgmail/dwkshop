@@ -122,6 +122,20 @@ function shippedOrder() {
 }
 
 async function mockAdminApi(page: Page, seen: Request[], options: { couponStatus?: number } = {}) {
+  const members = [
+    {
+      id: 7,
+      mobile: '13800000001',
+      nickname: 'E2E Buyer',
+      status: 'ACTIVE',
+      availablePoints: 500,
+      lockedPoints: 0,
+      orderCount: 1,
+      couponCount: 1,
+      createdAt: '2026-06-30T08:00:00'
+    }
+  ];
+
   const handler = async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -150,19 +164,28 @@ async function mockAdminApi(page: Page, seen: Request[], options: { couponStatus
     if (url.pathname === `/admin/orders/${order.id}/ship` && method === 'POST') return json(route, shippedOrder());
     if (url.pathname === '/admin/aftersales' && method === 'GET') return json(route, []);
     if (url.pathname === '/admin/users' && method === 'GET') {
-      return json(route, [
-        {
-          id: 7,
-          mobile: '13800000001',
-          nickname: 'E2E Buyer',
-          status: 'ACTIVE',
-          availablePoints: 500,
-          lockedPoints: 0,
-          orderCount: 1,
-          couponCount: 1,
-          createdAt: '2026-06-30T08:00:00'
-        }
-      ]);
+      return json(route, members);
+    }
+    if (url.pathname === '/admin/users' && method === 'POST') {
+      const payload = request.postDataJSON();
+      const member = {
+        id: 8,
+        mobile: payload.mobile,
+        nickname: payload.nickname || 'user0002',
+        status: payload.status,
+        availablePoints: 0,
+        lockedPoints: 0,
+        orderCount: 0,
+        couponCount: 0,
+        createdAt: '2026-07-01T08:00:00'
+      };
+      members.unshift(member);
+      return json(route, member);
+    }
+    if (url.pathname === '/admin/users/7/status' && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      members[0] = { ...members[0], status: payload.status };
+      return json(route, members[0]);
     }
     if (url.pathname === '/admin/coupons' && method === 'GET') {
       if (options.couponStatus) return json(route, { message: 'not found' }, options.couponStatus);
@@ -187,6 +210,7 @@ async function mockAdminApi(page: Page, seen: Request[], options: { couponStatus
         }
       ]);
     }
+    if (url.pathname === '/admin/operation-logs' && method === 'GET') return json(route, []);
 
     return json(route, { message: `Unhandled ${method} ${url.pathname}` }, 500);
   };
@@ -231,6 +255,45 @@ test('admin can inspect products, inspect an order, and ship it', async ({ page 
     logisticsNo: 'SF1234567890',
     deliveryRemark: 'Handle with care'
   });
+});
+
+test('admin can create a user and update user status', async ({ page }) => {
+  const seen: Request[] = [];
+  await mockAdminApi(page, seen);
+
+  await login(page);
+  await expect(page.locator('.metrics')).toContainText('1');
+
+  await page.locator('.sidebar nav button').nth(6).click();
+  await expect(page.locator('.page')).toContainText('E2E Buyer');
+
+  await page.getByRole('button', { name: '新增用户' }).click();
+  await page.locator('input[placeholder="13800000003"]').fill('13800000002');
+  await page.locator('input[placeholder="留空自动生成"]').fill('New Buyer');
+  await page.locator('input[placeholder="至少 6 位"]').fill('secret123');
+  await page.getByRole('button', { name: '保存用户' }).click();
+
+  await expect(page.locator('.page')).toContainText('New Buyer');
+
+  const createRequest = seen.find((request) => request.method() === 'POST' && new URL(request.url()).pathname === '/admin/users');
+  expect(await createRequest?.postDataJSON()).toEqual({
+    mobile: '13800000002',
+    nickname: 'New Buyer',
+    password: 'secret123',
+    status: 'ACTIVE'
+  });
+
+  page.once('dialog', async (dialog) => {
+    expect(dialog.message()).toContain('请输入用户状态变更原因');
+    await dialog.accept('E2E disable user');
+  });
+  await page.locator('tr', { hasText: 'E2E Buyer' }).getByRole('button', { name: '停用' }).click();
+  await expect(page.locator('tr', { hasText: 'E2E Buyer' })).toContainText('停用');
+
+  const statusRequest = seen.find((request) => request.method() === 'PATCH' && new URL(request.url()).pathname === '/admin/users/7/status');
+  expect(await statusRequest?.postDataJSON()).toEqual({ status: 'DISABLED' });
+  expect(statusRequest?.headers()['x-admin-confirm']).toBe('true');
+  expect(statusRequest?.headers()['x-admin-reason']).toBe('E2E disable user');
 });
 
 test('dashboard degrades when a secondary module returns 404 without showing a global error', async ({ page }) => {

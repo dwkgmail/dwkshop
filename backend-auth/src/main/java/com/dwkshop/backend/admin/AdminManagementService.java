@@ -36,6 +36,7 @@ public class AdminManagementService {
     private final AdminUserRoleRepository adminUserRoleRepository;
     private final AdminOperationLogService operationLogService;
     private final PasswordHasher passwordHasher;
+    private final AdminUserStatsClient statsClient;
 
     public AdminManagementService(
         UserRepository userRepository,
@@ -43,7 +44,8 @@ public class AdminManagementService {
         AdminRoleRepository adminRoleRepository,
         AdminUserRoleRepository adminUserRoleRepository,
         AdminOperationLogService operationLogService,
-        PasswordHasher passwordHasher
+        PasswordHasher passwordHasher,
+        AdminUserStatsClient statsClient
     ) {
         this.userRepository = userRepository;
         this.adminUserRepository = adminUserRepository;
@@ -51,6 +53,7 @@ public class AdminManagementService {
         this.adminUserRoleRepository = adminUserRoleRepository;
         this.operationLogService = operationLogService;
         this.passwordHasher = passwordHasher;
+        this.statsClient = statsClient;
     }
 
     @Transactional
@@ -77,14 +80,17 @@ public class AdminManagementService {
             snapshot("mobile", saved.getMobile()),
             "Create user"
         );
-        return toUserResponse(saved);
+        return toUserResponse(saved, statsClient.fetchStats(List.of(saved.getId())).getOrDefault(saved.getId(), AdminUserStats.empty()));
     }
 
     @Transactional(readOnly = true)
     public List<AdminUserResponse> listUsers() {
-        return userRepository.findAll().stream()
+        List<User> users = userRepository.findAll().stream()
             .sorted((left, right) -> Long.compare(right.getId(), left.getId()))
-            .map(this::toUserResponse)
+            .toList();
+        Map<Long, AdminUserStats> stats = statsClient.fetchStats(users.stream().map(User::getId).toList());
+        return users.stream()
+            .map(user -> toUserResponse(user, stats.getOrDefault(user.getId(), AdminUserStats.empty())))
             .toList();
     }
 
@@ -104,7 +110,7 @@ public class AdminManagementService {
             snapshot("status", user.getStatus()),
             "Update user status"
         );
-        return toUserResponse(user);
+        return toUserResponse(user, statsClient.fetchStats(List.of(user.getId())).getOrDefault(user.getId(), AdminUserStats.empty()));
     }
 
     @Transactional(readOnly = true)
@@ -172,16 +178,16 @@ public class AdminManagementService {
         return toAdminAccountResponse(admin, roles);
     }
 
-    private AdminUserResponse toUserResponse(User user) {
+    private AdminUserResponse toUserResponse(User user, AdminUserStats stats) {
         return new AdminUserResponse(
             user.getId(),
             user.getMobile(),
             user.getNickname(),
             user.getStatus(),
-            0,
-            0,
-            0,
-            0,
+            stats.availablePoints(),
+            stats.lockedPoints(),
+            stats.orderCount(),
+            stats.couponCount(),
             user.getCreatedAt()
         );
     }

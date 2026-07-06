@@ -2,8 +2,10 @@ package com.dwkshop.backend.marketing;
 
 import com.dwkshop.backend.marketing.dto.MarketingCouponSelectionResponse;
 import com.dwkshop.backend.marketing.dto.LockCouponRequest;
+import com.dwkshop.backend.marketing.dto.UserCouponCountResponse;
 import com.dwkshop.backend.marketing.dto.UseCouponRequest;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +31,11 @@ public class MarketingInternalController {
         @RequestParam int productAmount
     ) {
         return marketingService.selectCoupon(userId, requestedCouponUserId, productAmount);
+    }
+
+    @GetMapping("/user-coupon-counts")
+    public List<UserCouponCountResponse> countCouponsByUsers(@RequestParam List<Long> userIds) {
+        return marketingService.countCouponsByUsers(userIds);
     }
 
     @PostMapping("/users/{userId}/coupons/{userCouponId}/lock")

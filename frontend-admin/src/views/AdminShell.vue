@@ -235,8 +235,8 @@ const dashboard = computed(() => {
     payAmountText: formatCents(payAmount),
     waitShip: orders.value.filter((item) => item.orderStatus === 'WAIT_SHIP').length,
     refundApplying: aftersales.value.filter((item) => ['APPLYING', 'WAIT_RETURN', 'REFUNDING', 'REFUND_FAILED'].includes(item.aftersaleStatus)).length,
-    couponEnabled: '-',
-    activeMembers: '-'
+    couponEnabled: adminModuleUnavailable.coupons ? '-' : coupons.value.filter((item) => item.couponStatus === 'ENABLED').length,
+    activeMembers: adminModuleUnavailable.users ? '-' : members.value.filter((item) => item.status === 'ACTIVE').length
   };
 });
 
@@ -404,7 +404,17 @@ function nav(key: string) {
 
 async function loadDashboard() {
   await runTask(async () => {
-    await Promise.all([loadProductsQuietly(), loadOrdersQuietly(), loadAftersalesQuietly()]);
+    await Promise.all([
+      loadProductsQuietly(),
+      loadOrdersQuietly(),
+      loadAftersalesQuietly(),
+      loadOptionalAdminModule('users', loadMembersQuietly, () => {
+        members.value = [];
+      }),
+      loadOptionalAdminModule('coupons', loadCouponsQuietly, () => {
+        coupons.value = [];
+      })
+    ]);
   });
 }
 
@@ -1192,7 +1202,7 @@ onUnmounted(() => {
             <option value="ACTIVE">启用</option>
             <option value="DISABLED">停用</option>
           </select>
-          <button class="ghost" type="button" @click="showMemberCreate = !showMemberCreate">{{ showMemberCreate ? '收起' : '新增用户' }}</button>
+          <button class="ghost" type="button" :disabled="adminModuleUnavailable.users" @click="showMemberCreate = !showMemberCreate">{{ showMemberCreate ? '收起' : '新增用户' }}</button>
           <button class="primary" type="button" @click="loadMembers">刷新</button>
         </section>
         <section v-if="showMemberCreate" class="panel form-grid">

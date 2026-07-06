@@ -1,6 +1,7 @@
 package com.dwkshop.backend.domain.repository;
 
 import com.dwkshop.backend.domain.entity.TradeOrder;
+import com.dwkshop.backend.order.dto.UserOrderCountResponse;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -21,6 +22,14 @@ public interface TradeOrderRepository extends JpaRepository<TradeOrder, Long> {
     Optional<TradeOrder> findByUserIdAndClientRequestId(Long userId, String clientRequestId);
 
     List<TradeOrder> findByIdIn(Collection<Long> ids);
+
+    @Query("""
+        select new com.dwkshop.backend.order.dto.UserOrderCountResponse(o.userId, count(o))
+        from TradeOrder o
+        where o.userId in :userIds
+        group by o.userId
+        """)
+    List<UserOrderCountResponse> countByUserIds(@Param("userIds") Collection<Long> userIds);
 
     @Query("select o.id from TradeOrder o where o.orderStatus = :status and o.createdAt < :cutoff order by o.createdAt asc")
     List<Long> findStaleOrderIdsByStatus(

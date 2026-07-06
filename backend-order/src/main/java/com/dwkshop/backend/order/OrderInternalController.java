@@ -2,6 +2,7 @@ package com.dwkshop.backend.order;
 
 import com.dwkshop.backend.order.dto.PaymentCallbackRequest;
 import com.dwkshop.backend.order.dto.PaymentCallbackResponse;
+import com.dwkshop.backend.order.dto.UserOrderCountResponse;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,6 +41,11 @@ public class OrderInternalController {
     @GetMapping("/inventory-reconciliation/health")
     public InventoryOrderHealth getInventoryOrderHealth(@RequestParam(defaultValue = "10") int pendingMinutes) {
         return orderService.getInventoryOrderHealth(pendingMinutes);
+    }
+
+    @GetMapping("/user-counts")
+    public List<UserOrderCountResponse> countOrdersByUsers(@RequestParam List<Long> userIds) {
+        return orderService.countOrdersByUsers(userIds);
     }
 
     @PostMapping("/{orderId}/aftersale/apply")

@@ -11,7 +11,9 @@ import com.dwkshop.backend.domain.repository.CouponUseFlowRepository;
 import com.dwkshop.backend.domain.repository.CouponUserRepository;
 import com.dwkshop.backend.marketing.dto.MarketingCouponResponse;
 import com.dwkshop.backend.marketing.dto.MarketingCouponSelectionResponse;
+import com.dwkshop.backend.marketing.dto.UserCouponCountResponse;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -174,6 +176,14 @@ public class MarketingService {
         couponUserRepository.save(couponUser);
         saveUseFlow(couponUser, orderId, "REFUND", beforeStatus, REFUNDED, now);
         operationLogService.record("COUPON_REFUND", "COUPON_USER", userCouponId, couponSnapshot(couponUser, beforeStatus), couponSnapshot(couponUser, REFUNDED), "优惠券退回");
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserCouponCountResponse> countCouponsByUsers(Collection<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return List.of();
+        }
+        return couponUserRepository.countByUserIds(userIds);
     }
 
     private CouponUser lockCouponUser(Long userId, Long userCouponId) {

@@ -51,3 +51,10 @@ dwkshop:
     ttl-seconds: 86400
   internal:
     secret: ${DWKSHOP_INTERNAL_SECRET:dwkshop-local-internal-secret-change-me}
+  services:
+    member:
+      base-url: ${DWKSHOP_MEMBER_SERVICE_BASE_URL:http://localhost:18086}
+    order:
+      base-url: ${DWKSHOP_ORDER_SERVICE_BASE_URL:http://localhost:18084}
+    marketing:
+      base-url: ${DWKSHOP_MARKETING_SERVICE_BASE_URL:http://localhost:18087}

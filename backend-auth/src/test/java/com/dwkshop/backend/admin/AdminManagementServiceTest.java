@@ -15,6 +15,7 @@ import com.dwkshop.backend.domain.repository.AdminUserRoleRepository;
 import com.dwkshop.backend.domain.repository.UserRepository;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,7 @@ class AdminManagementServiceTest {
     @Mock AdminUserRoleRepository adminUserRoleRepository;
     @Mock AdminOperationLogService operationLogService;
     @Mock PasswordHasher passwordHasher;
+    @Mock AdminUserStatsClient statsClient;
 
     AdminManagementService service;
 
@@ -48,7 +50,8 @@ class AdminManagementServiceTest {
             adminRoleRepository,
             adminUserRoleRepository,
             operationLogService,
-            passwordHasher
+            passwordHasher,
+            statsClient
         );
     }
 
@@ -57,22 +60,31 @@ class AdminManagementServiceTest {
         User older = user(1L, "13800000001", "older", "ACTIVE");
         User newer = user(2L, "13800000002", "newer", "DISABLED");
         when(userRepository.findAll()).thenReturn(List.of(older, newer));
+        when(statsClient.fetchStats(List.of(2L, 1L))).thenReturn(Map.of(
+            2L, new AdminUserStats(120, 30, 4, 2)
+        ));
 
         var result = service.listUsers();
 
         assertThat(result).extracting("id").containsExactly(2L, 1L);
-        assertThat(result.getFirst().availablePoints()).isZero();
-        assertThat(result.getFirst().orderCount()).isZero();
+        assertThat(result.getFirst().availablePoints()).isEqualTo(120);
+        assertThat(result.getFirst().lockedPoints()).isEqualTo(30);
+        assertThat(result.getFirst().orderCount()).isEqualTo(4);
+        assertThat(result.getFirst().couponCount()).isEqualTo(2);
+        assertThat(result.get(1).availablePoints()).isZero();
     }
 
     @Test
     void updateUserStatusPersistsAndRecordsAuditLog() {
         User user = user(1L, "13800000001", "buyer", "ACTIVE");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(statsClient.fetchStats(List.of(1L))).thenReturn(Map.of(1L, new AdminUserStats(50, 0, 1, 3)));
 
         var result = service.updateUserStatus(1L, new AdminStatusRequest("disabled"));
 
         assertThat(result.status()).isEqualTo("DISABLED");
+        assertThat(result.availablePoints()).isEqualTo(50);
+        assertThat(result.couponCount()).isEqualTo(3);
         assertThat(user.getUpdatedAt()).isNotNull();
         verify(userRepository).save(user);
         verify(operationLogService).record(
@@ -91,6 +103,7 @@ class AdminManagementServiceTest {
         when(userRepository.findTopByOrderByIdDesc()).thenReturn(Optional.of(user(2L, "13800000002", "newer", "ACTIVE")));
         when(passwordHasher.hash("secret123")).thenReturn("hashed-secret");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(statsClient.fetchStats(List.of(3L))).thenReturn(Map.of());
 
         var result = service.createUser(new AdminCreateUserRequest("13800000003", "secret123", "", "active"));
 

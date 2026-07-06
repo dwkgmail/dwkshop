@@ -33,3 +33,13 @@ export function validateProductName(name: string): ValidationResult {
   }
   return { valid: true };
 }
+
+export function validateAdminMember(mobile: string, password: string): ValidationResult {
+  if (!/^1\d{10}$/.test(mobile.trim())) {
+    return { valid: false, message: 'Please enter a valid mobile number' };
+  }
+  if (password.trim().length < 6) {
+    return { valid: false, message: 'Password must be at least 6 characters' };
+  }
+  return { valid: true };
+}

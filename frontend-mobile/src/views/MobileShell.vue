@@ -34,6 +34,7 @@ import {
   type OrderDetail,
   type OrderSummary
 } from '../api/orders';
+import { validateRequiredCredentials, validateUserRegistration } from '../validation/forms';
 
 type ViewName =
   | 'home'
@@ -145,8 +146,9 @@ function openLogin(target: { view: ViewName; params: Record<string, string | num
 async function login() {
   const mobile = loginForm.mobile.trim();
   const password = loginForm.password.trim();
-  if (!mobile || !password) {
-    showToast('Please enter mobile and password');
+  const validation = validateRequiredCredentials(mobile, password);
+  if (!validation.valid) {
+    showToast(validation.message ?? 'Please enter mobile and password');
     return;
   }
   await runTask(async () => {
@@ -166,8 +168,9 @@ async function register() {
   const mobile = registerForm.mobile.trim();
   const password = registerForm.password.trim();
   const nickname = registerForm.nickname.trim();
-  if (!mobile || !password) {
-    showToast('Please enter mobile and password');
+  const validation = validateUserRegistration(mobile, password);
+  if (!validation.valid) {
+    showToast(validation.message ?? 'Please check registration fields');
     return;
   }
   await runTask(async () => {

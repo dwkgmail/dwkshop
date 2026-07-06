@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validatePasswordChange, validateRequiredCredentials } from '../../src/validation/forms';
+import { validatePasswordChange, validateRequiredCredentials, validateUserRegistration } from '../../src/validation/forms';
 
 describe('mobile form validation', () => {
   it('requires login credentials', () => {
@@ -13,6 +13,14 @@ describe('mobile form validation', () => {
     expect(validatePasswordChange('old', 'new-a', 'new-b')).toEqual({
       valid: false,
       message: 'New passwords do not match'
+    });
+  });
+
+  it('validates user registration', () => {
+    expect(validateUserRegistration('13800000003', 'user123')).toEqual({ valid: true });
+    expect(validateUserRegistration('12345', 'user123')).toEqual({
+      valid: false,
+      message: 'Please enter a valid mobile number'
     });
   });
 });

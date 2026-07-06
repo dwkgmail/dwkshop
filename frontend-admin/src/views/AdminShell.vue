@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import {
   assignAdminRole,
+  createAdminMember,
   createCoupon,
   getAdminAccounts,
   getAdminMembers,
@@ -49,6 +50,7 @@ import {
   type ProductPayload,
   type ProductSku
 } from '../api/products';
+import { validateAdminMember } from '../validation/forms';
 
 type Page =
   | 'dashboard'
@@ -73,6 +75,7 @@ const loading = ref(false);
 const error = ref('');
 const toast = ref('');
 const showPasswordPanel = ref(false);
+const showMemberCreate = ref(false);
 const adminModuleUnavailable = reactive({
   users: false,
   coupons: false,
@@ -101,6 +104,7 @@ const productFilters = reactive({ name: '', categoryId: '', saleStatus: '' });
 const orderFilters = reactive({ orderNo: '', mobile: '', orderStatus: '' });
 const aftersaleFilters = reactive({ keyword: '', status: '' });
 const memberFilters = reactive({ keyword: '', status: '' });
+const memberForm = reactive({ mobile: '', nickname: '', password: '', status: 'ACTIVE' });
 const couponFilters = reactive({ keyword: '', status: '' });
 const logFilters = reactive({ module: '', keyword: '' });
 const inventoryFilters = reactive({ onlyDiff: true });
@@ -795,6 +799,30 @@ async function toggleMember(item: AdminMember) {
   });
 }
 
+function resetMemberForm() {
+  Object.assign(memberForm, { mobile: '', nickname: '', password: '', status: 'ACTIVE' });
+}
+
+async function saveMember() {
+  const validation = validateAdminMember(memberForm.mobile, memberForm.password);
+  if (!validation.valid) {
+    showToast(validation.message ?? 'Please check member fields');
+    return;
+  }
+  await runTask(async () => {
+    await createAdminMember({
+      mobile: memberForm.mobile.trim(),
+      nickname: memberForm.nickname.trim() || undefined,
+      password: memberForm.password.trim(),
+      status: memberForm.status
+    });
+    resetMemberForm();
+    showMemberCreate.value = false;
+    await Promise.all([loadMembersQuietly(), loadLogsQuietly().catch(() => undefined)]);
+    showToast('用户已创建');
+  });
+}
+
 async function toggleAdminAccount(item: AdminAccount) {
   const nextStatus = item.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
   const reason = window.prompt('请输入管理员账号状态变更原因', `管理员账号${nextStatus}`)?.trim();
@@ -1164,7 +1192,18 @@ onUnmounted(() => {
             <option value="ACTIVE">启用</option>
             <option value="DISABLED">停用</option>
           </select>
+          <button class="ghost" type="button" @click="showMemberCreate = !showMemberCreate">{{ showMemberCreate ? '收起' : '新增用户' }}</button>
           <button class="primary" type="button" @click="loadMembers">刷新</button>
+        </section>
+        <section v-if="showMemberCreate" class="panel form-grid">
+          <label>手机号<input v-model="memberForm.mobile" inputmode="tel" placeholder="13800000003" /></label>
+          <label>昵称<input v-model="memberForm.nickname" placeholder="留空自动生成" /></label>
+          <label>初始密码<input v-model="memberForm.password" type="password" autocomplete="new-password" placeholder="至少 6 位" /></label>
+          <label>状态<select v-model="memberForm.status"><option value="ACTIVE">启用</option><option value="DISABLED">停用</option></select></label>
+          <div class="form-actions full">
+            <button class="ghost" type="button" @click="showMemberCreate = false; resetMemberForm()">取消</button>
+            <button class="primary" type="button" @click="saveMember">保存用户</button>
+          </div>
         </section>
         <section v-if="adminModuleUnavailable.users" class="panel empty">{{ adminModuleUnavailableText }}</section>
         <section class="panel table-panel">

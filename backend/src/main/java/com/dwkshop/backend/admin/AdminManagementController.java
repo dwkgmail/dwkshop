@@ -4,6 +4,7 @@ import com.dwkshop.backend.auth.RequiresConfirmation;
 import com.dwkshop.backend.auth.RequiresPermission;
 import com.dwkshop.backend.admin.dto.AdminAccountResponse;
 import com.dwkshop.backend.admin.dto.AdminAssignRoleRequest;
+import com.dwkshop.backend.admin.dto.AdminCreateUserRequest;
 import com.dwkshop.backend.admin.dto.AdminCouponRequest;
 import com.dwkshop.backend.admin.dto.AdminCouponResponse;
 import com.dwkshop.backend.admin.dto.AdminOperationLogResponse;
@@ -36,6 +37,12 @@ public class AdminManagementController {
     @RequiresPermission("user:read")
     public List<AdminUserResponse> users() {
         return adminManagementService.listUsers();
+    }
+
+    @PostMapping("/users")
+    @RequiresPermission("user:write")
+    public AdminUserResponse createUser(@Valid @RequestBody AdminCreateUserRequest request) {
+        return adminManagementService.createUser(request);
     }
 
     @PatchMapping("/users/{id}/status")

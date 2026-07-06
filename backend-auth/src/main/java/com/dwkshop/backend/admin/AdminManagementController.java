@@ -2,6 +2,7 @@ package com.dwkshop.backend.admin;
 
 import com.dwkshop.backend.admin.dto.AdminAccountResponse;
 import com.dwkshop.backend.admin.dto.AdminAssignRoleRequest;
+import com.dwkshop.backend.admin.dto.AdminCreateUserRequest;
 import com.dwkshop.backend.admin.dto.AdminRoleResponse;
 import com.dwkshop.backend.admin.dto.AdminStatusRequest;
 import com.dwkshop.backend.admin.dto.AdminUserResponse;
@@ -12,6 +13,7 @@ import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -30,6 +32,12 @@ public class AdminManagementController {
     @RequiresPermission("user:read")
     public List<AdminUserResponse> users() {
         return adminManagementService.listUsers();
+    }
+
+    @PostMapping("/users")
+    @RequiresPermission("user:write")
+    public AdminUserResponse createUser(@Valid @RequestBody AdminCreateUserRequest request) {
+        return adminManagementService.createUser(request);
     }
 
     @PatchMapping("/users/{id}/status")

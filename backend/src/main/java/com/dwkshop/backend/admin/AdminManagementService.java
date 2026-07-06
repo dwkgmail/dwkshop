@@ -2,11 +2,13 @@ package com.dwkshop.backend.admin;
 
 import com.dwkshop.backend.admin.dto.AdminAccountResponse;
 import com.dwkshop.backend.admin.dto.AdminAssignRoleRequest;
+import com.dwkshop.backend.admin.dto.AdminCreateUserRequest;
 import com.dwkshop.backend.admin.dto.AdminCouponRequest;
 import com.dwkshop.backend.admin.dto.AdminCouponResponse;
 import com.dwkshop.backend.admin.dto.AdminRoleResponse;
 import com.dwkshop.backend.admin.dto.AdminStatusRequest;
 import com.dwkshop.backend.admin.dto.AdminUserResponse;
+import com.dwkshop.backend.auth.PasswordHasher;
 import com.dwkshop.backend.domain.entity.AdminRole;
 import com.dwkshop.backend.domain.entity.AdminUser;
 import com.dwkshop.backend.domain.entity.AdminUserRole;
@@ -46,6 +48,7 @@ public class AdminManagementService {
     private final AdminRoleRepository adminRoleRepository;
     private final AdminUserRoleRepository adminUserRoleRepository;
     private final AdminOperationLogService operationLogService;
+    private final PasswordHasher passwordHasher;
 
     public AdminManagementService(
         UserRepository userRepository,
@@ -56,7 +59,8 @@ public class AdminManagementService {
         AdminUserRepository adminUserRepository,
         AdminRoleRepository adminRoleRepository,
         AdminUserRoleRepository adminUserRoleRepository,
-        AdminOperationLogService operationLogService
+        AdminOperationLogService operationLogService,
+        PasswordHasher passwordHasher
     ) {
         this.userRepository = userRepository;
         this.pointAccountRepository = pointAccountRepository;
@@ -67,6 +71,27 @@ public class AdminManagementService {
         this.adminRoleRepository = adminRoleRepository;
         this.adminUserRoleRepository = adminUserRoleRepository;
         this.operationLogService = operationLogService;
+        this.passwordHasher = passwordHasher;
+    }
+
+    @Transactional
+    public AdminUserResponse createUser(AdminCreateUserRequest request) {
+        String mobile = request.mobile().trim();
+        if (userRepository.existsByMobile(mobile)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mobile already exists");
+        }
+        User user = new User();
+        user.setId(nextUserId());
+        user.setMobile(mobile);
+        user.setNickname(resolveNickname(request.nickname(), mobile));
+        user.setPasswordHash(passwordHasher.hash(request.password().trim()));
+        user.setStatus(request.status() == null || request.status().isBlank() ? "ACTIVE" : normalizeStatus(request.status()));
+        LocalDateTime now = LocalDateTime.now();
+        user.setCreatedAt(now);
+        user.setUpdatedAt(now);
+        User saved = userRepository.save(user);
+        operationLogService.record("USER_CREATE", "USER", saved.getId(), null, snapshot("mobile", saved.getMobile()), "鍒涘缓鐢ㄦ埛");
+        return toUserResponse(saved);
     }
 
     @Transactional(readOnly = true)
@@ -258,6 +283,16 @@ public class AdminManagementService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported status");
         }
         return normalized;
+    }
+
+    private String resolveNickname(String nickname, String mobile) {
+        return nickname == null || nickname.isBlank() ? "user" + mobile.substring(7) : nickname.trim();
+    }
+
+    private Long nextUserId() {
+        return userRepository.findTopByOrderByIdDesc()
+            .map(User::getId)
+            .orElse(0L) + 1;
     }
 
     private Map<String, Object> snapshot(String key, Object value) {

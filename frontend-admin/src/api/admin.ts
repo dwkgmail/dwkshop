@@ -12,6 +12,13 @@ export interface AdminMember {
   createdAt: string;
 }
 
+export interface AdminMemberPayload {
+  mobile: string;
+  password: string;
+  nickname?: string;
+  status: string;
+}
+
 export interface AdminCoupon {
   id: number;
   couponCode: string;
@@ -144,6 +151,13 @@ export interface InventoryReconciliationReport {
 
 export function getAdminMembers() {
   return request<AdminMember[]>('/admin/users');
+}
+
+export function createAdminMember(payload: AdminMemberPayload) {
+  return request<AdminMember>('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
 }
 
 export function updateMemberStatus(id: number, status: string, reason: string) {

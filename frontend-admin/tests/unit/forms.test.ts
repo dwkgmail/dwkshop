@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateAdminLogin, validateProductName, validateShipment } from '../../src/validation/forms';
+import { validateAdminLogin, validateAdminMember, validateProductName, validateShipment } from '../../src/validation/forms';
 
 describe('admin form validation', () => {
   it('requires admin credentials', () => {
@@ -20,6 +20,14 @@ describe('admin form validation', () => {
     expect(validateShipment('SF Express', '')).toEqual({
       valid: false,
       message: 'Please enter logistics company and tracking number'
+    });
+  });
+
+  it('validates admin-created members', () => {
+    expect(validateAdminMember('13800000003', 'secret123')).toEqual({ valid: true });
+    expect(validateAdminMember('12345', 'secret123')).toEqual({
+      valid: false,
+      message: 'Please enter a valid mobile number'
     });
   });
 });

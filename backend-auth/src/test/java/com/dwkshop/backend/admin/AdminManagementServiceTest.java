@@ -1,8 +1,10 @@
 package com.dwkshop.backend.admin;
 
 import com.dwkshop.backend.admin.dto.AdminAssignRoleRequest;
+import com.dwkshop.backend.admin.dto.AdminCreateUserRequest;
 import com.dwkshop.backend.admin.dto.AdminStatusRequest;
 import com.dwkshop.backend.audit.AdminOperationLogService;
+import com.dwkshop.backend.auth.PasswordHasher;
 import com.dwkshop.backend.domain.entity.AdminRole;
 import com.dwkshop.backend.domain.entity.AdminUser;
 import com.dwkshop.backend.domain.entity.AdminUserRole;
@@ -34,6 +36,7 @@ class AdminManagementServiceTest {
     @Mock AdminRoleRepository adminRoleRepository;
     @Mock AdminUserRoleRepository adminUserRoleRepository;
     @Mock AdminOperationLogService operationLogService;
+    @Mock PasswordHasher passwordHasher;
 
     AdminManagementService service;
 
@@ -44,7 +47,8 @@ class AdminManagementServiceTest {
             adminUserRepository,
             adminRoleRepository,
             adminUserRoleRepository,
-            operationLogService
+            operationLogService,
+            passwordHasher
         );
     }
 
@@ -78,6 +82,29 @@ class AdminManagementServiceTest {
             any(),
             any(),
             eq("Update user status")
+        );
+    }
+
+    @Test
+    void createUserHashesPasswordPersistsAndRecordsAuditLog() {
+        when(userRepository.existsByMobile("13800000003")).thenReturn(false);
+        when(userRepository.findTopByOrderByIdDesc()).thenReturn(Optional.of(user(2L, "13800000002", "newer", "ACTIVE")));
+        when(passwordHasher.hash("secret123")).thenReturn("hashed-secret");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.createUser(new AdminCreateUserRequest("13800000003", "secret123", "", "active"));
+
+        assertThat(result.id()).isEqualTo(3L);
+        assertThat(result.nickname()).isEqualTo("user0003");
+        assertThat(result.status()).isEqualTo("ACTIVE");
+        verify(userRepository).save(any(User.class));
+        verify(operationLogService).record(
+            eq("USER_CREATE"),
+            eq("USER"),
+            eq(3L),
+            eq(null),
+            any(),
+            eq("Create user")
         );
     }
 

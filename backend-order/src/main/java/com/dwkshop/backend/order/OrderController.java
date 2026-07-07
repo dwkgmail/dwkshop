@@ -1,6 +1,7 @@
 package com.dwkshop.backend.order;
 
 import com.dwkshop.backend.auth.AuthContext;
+import com.dwkshop.backend.auth.AuthException;
 import com.dwkshop.backend.order.dto.ConfirmOrderRequest;
 import com.dwkshop.backend.order.dto.ConfirmOrderResponse;
 import com.dwkshop.backend.order.dto.CreateOrderRequest;
@@ -14,14 +15,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/orders")
 public class OrderController {
-
-    private static final Long DEFAULT_USER_ID = 1L;
 
     private final OrderService orderService;
 
@@ -31,45 +29,40 @@ public class OrderController {
 
     @PostMapping("/confirm")
     public ConfirmOrderResponse confirm(
-        @RequestParam(required = false) Long userId,
         @RequestBody ConfirmOrderRequest request
     ) {
-        return orderService.confirm(resolveUserId(userId), request);
+        return orderService.confirm(currentUserId(), request);
     }
 
     @PostMapping("/create")
     public OrderResponse create(
-        @RequestParam(required = false) Long userId,
         @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
         @Valid @RequestBody CreateOrderRequest request
     ) {
-        return orderService.create(resolveUserId(userId), request.withClientRequestId(idempotencyKey));
+        return orderService.create(currentUserId(), request.withClientRequestId(idempotencyKey));
     }
 
     @GetMapping
-    public List<OrderSummaryResponse> list(@RequestParam(required = false) Long userId) {
-        return orderService.listOrders(resolveUserId(userId));
+    public List<OrderSummaryResponse> list() {
+        return orderService.listOrders(currentUserId());
     }
 
     @GetMapping("/{id}")
-    public OrderResponse detail(@PathVariable Long id, @RequestParam(required = false) Long userId) {
-        return orderService.getOrder(resolveUserId(userId), id);
+    public OrderResponse detail(@PathVariable Long id) {
+        return orderService.getOrder(currentUserId(), id);
     }
 
     @PostMapping("/{id}/cancel")
-    public OrderResponse cancel(@PathVariable Long id, @RequestParam(required = false) Long userId) {
-        return orderService.cancel(resolveUserId(userId), id);
+    public OrderResponse cancel(@PathVariable Long id) {
+        return orderService.cancel(currentUserId(), id);
     }
 
     @PostMapping("/{id}/pay")
-    public OrderResponse pay(@PathVariable Long id, @RequestParam(required = false) Long userId) {
-        return orderService.pay(resolveUserId(userId), id);
+    public OrderResponse pay(@PathVariable Long id) {
+        return orderService.pay(currentUserId(), id);
     }
 
-    private Long resolveUserId(Long userId) {
-        if (userId != null) {
-            return userId;
-        }
-        return AuthContext.currentUserId().orElse(DEFAULT_USER_ID);
+    private Long currentUserId() {
+        return AuthContext.currentUserId().orElseThrow(() -> new AuthException("please login first"));
     }
 }

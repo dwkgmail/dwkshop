@@ -85,10 +85,49 @@ class OrderBusinessFlowIntegrationTest {
     }
 
     @Test
+    void userOrderEndpointUsesAuthenticatedPrincipalWhenUserIdParameterIsForged() throws Exception {
+        when(productCatalogClient.getSkuSnapshot(509L)).thenReturn(sku(509L, 5, 1000, true));
+
+        mockMvc.perform(post("/api/orders/confirm")
+                .header("Authorization", "Bearer " + userToken())
+                .param("userId", "2")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "sourceType": "BUY_NOW",
+                      "skuId": 509,
+                      "quantity": 1,
+                      "addressId": 10
+                    }
+                    """))
+            .andExpect(status().isOk());
+
+        verify(memberClient).resolveAddress(1L, 10L);
+        verify(memberClient, org.mockito.Mockito.never()).resolveAddress(2L, 10L);
+    }
+
+    @Test
+    void userOrderEndpointRejectsAnonymousRequest() throws Exception {
+        mockMvc.perform(post("/api/orders/confirm")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "sourceType": "BUY_NOW",
+                      "skuId": 510,
+                      "quantity": 1,
+                      "addressId": 10
+                    }
+                    """))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.message").value("please login first"));
+    }
+
+    @Test
     void confirmFailsWhenSkuStockIsInsufficient() throws Exception {
         when(productCatalogClient.getSkuSnapshot(501L)).thenReturn(sku(501L, 1, 1000, true));
 
         mockMvc.perform(post("/api/orders/confirm")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -124,6 +163,7 @@ class OrderBusinessFlowIntegrationTest {
             """);
 
         assertThatThrownBy(() -> mockMvc.perform(post("/api/orders/create")
+            .header("Authorization", "Bearer " + userToken())
             .contentType(APPLICATION_JSON)
             .content("""
                 {
@@ -153,6 +193,7 @@ class OrderBusinessFlowIntegrationTest {
             """);
 
         CountDownLatch start = new CountDownLatch(1);
+        String buyerToken = userToken();
         var statuses = java.util.Collections.synchronizedList(new ArrayList<Integer>());
         var executor = Executors.newFixedThreadPool(2);
 
@@ -161,6 +202,7 @@ class OrderBusinessFlowIntegrationTest {
                 try {
                     start.await();
                     int status = mockMvc.perform(post("/api/orders/create")
+                            .header("Authorization", "Bearer " + buyerToken)
                             .contentType(APPLICATION_JSON)
                             .content("""
                                 {
@@ -202,6 +244,7 @@ class OrderBusinessFlowIntegrationTest {
             """);
 
         String first = mockMvc.perform(post("/api/orders/create")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .header("Idempotency-Key", "checkout-retry-001")
                 .content("""
@@ -217,6 +260,7 @@ class OrderBusinessFlowIntegrationTest {
         Integer firstOrderId = com.jayway.jsonpath.JsonPath.read(first, "$.id");
 
         mockMvc.perform(post("/api/orders/create")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .header("Idempotency-Key", "checkout-retry-001")
                 .content("""
@@ -250,6 +294,7 @@ class OrderBusinessFlowIntegrationTest {
             """);
 
         mockMvc.perform(post("/api/orders/create")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -283,6 +328,7 @@ class OrderBusinessFlowIntegrationTest {
             """);
 
         mockMvc.perform(post("/api/orders/create")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -296,7 +342,8 @@ class OrderBusinessFlowIntegrationTest {
         TradeOrder order = tradeOrderRepository.findAll().get(0);
         when(productCatalogClient.getSkuSnapshot(507L)).thenReturn(sku(507L, 5, 1000, true, "OFF_SALE", "ENABLED"));
 
-        mockMvc.perform(post("/api/orders/{orderId}/pay", order.getId()))
+        mockMvc.perform(post("/api/orders/{orderId}/pay", order.getId())
+                .header("Authorization", "Bearer " + userToken()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.payStatus").value("PAID"))
             .andExpect(jsonPath("$.orderStatus").value("WAIT_SHIP"));
@@ -321,6 +368,7 @@ class OrderBusinessFlowIntegrationTest {
             """);
 
         mockMvc.perform(post("/api/orders/create")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -335,7 +383,8 @@ class OrderBusinessFlowIntegrationTest {
         TradeOrder order = tradeOrderRepository.findAll().get(0);
         verify(memberClient).freezePoints(1L, order.getId(), "ORDER_POINT:" + order.getId(), 50000);
 
-        mockMvc.perform(post("/api/orders/{orderId}/pay", order.getId()))
+        mockMvc.perform(post("/api/orders/{orderId}/pay", order.getId())
+                .header("Authorization", "Bearer " + userToken()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.payStatus").value("PAID"));
         verify(memberClient).deductFrozenPoints(1L, order.getId(), "ORDER_POINT:" + order.getId(), 50000);
@@ -369,6 +418,7 @@ class OrderBusinessFlowIntegrationTest {
         ));
 
         String confirm = mockMvc.perform(post("/api/orders/confirm")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -394,6 +444,7 @@ class OrderBusinessFlowIntegrationTest {
         String token = com.jayway.jsonpath.JsonPath.read(confirm, "$.settlementToken");
 
         mockMvc.perform(post("/api/orders/create")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -576,6 +627,7 @@ class OrderBusinessFlowIntegrationTest {
 
     private String confirmToken(String payload) throws Exception {
         return com.jayway.jsonpath.JsonPath.read(mockMvc.perform(post("/api/orders/confirm")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content(payload))
             .andExpect(status().isOk())
@@ -675,5 +727,9 @@ class OrderBusinessFlowIntegrationTest {
 
     private String adminToken() {
         return authTokenService.issue(99L, "admin", "ADMIN");
+    }
+
+    private String userToken() {
+        return authTokenService.issue(1L, "buyer", "USER");
     }
 }

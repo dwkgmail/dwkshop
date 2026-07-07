@@ -1,12 +1,24 @@
 package com.dwkshop.backend;
 
+import com.dwkshop.backend.auth.AuthTokenService;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.core.Ordered;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.everyItem;
@@ -37,6 +49,47 @@ class BackendApplicationTests {
 
     @Test
     void contextLoads() {
+    }
+
+    @TestConfiguration
+    static class DefaultUserAuthTestConfig {
+
+        @Bean
+        FilterRegistrationBean<OncePerRequestFilter> defaultUserAuthFilter(AuthTokenService authTokenService) {
+            String token = "Bearer " + authTokenService.issue(1L, "buyer", "USER");
+            FilterRegistrationBean<OncePerRequestFilter> registration = new FilterRegistrationBean<>();
+            registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+            registration.setFilter(new OncePerRequestFilter() {
+                @Override
+                protected void doFilterInternal(
+                    HttpServletRequest request,
+                    HttpServletResponse response,
+                    FilterChain filterChain
+                ) throws ServletException, IOException {
+                    String path = request.getRequestURI();
+                    if (request.getHeader("Authorization") == null && isUserApi(path)) {
+                        filterChain.doFilter(new HttpServletRequestWrapper(request) {
+                            @Override
+                            public String getHeader(String name) {
+                                if ("Authorization".equalsIgnoreCase(name)) {
+                                    return token;
+                                }
+                                return super.getHeader(name);
+                            }
+                        }, response);
+                        return;
+                    }
+                    filterChain.doFilter(request, response);
+                }
+
+                private boolean isUserApi(String path) {
+                    return path.startsWith("/api/cart/")
+                        || path.startsWith("/api/orders")
+                        || path.startsWith("/api/aftersales");
+                }
+            });
+            return registration;
+        }
     }
 
     @Test

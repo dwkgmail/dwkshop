@@ -72,6 +72,57 @@ class AftersaleServiceIntegrationTest {
     }
 
     @Test
+    void userAftersaleEndpointUsesAuthenticatedPrincipalWhenUserIdParameterIsForged() throws Exception {
+        when(orderClient.applyAftersale(105L, 1L)).thenReturn(
+            new AftersaleOrderSnapshot(105L, "SO202606180105", 1L, "13800000005", "WAIT_SHIP", "PAID", "NONE", 9900, true)
+        );
+        when(orderClient.getRefundContext(105L)).thenReturn(
+            new RefundOrderContext(
+                105L,
+                "SO202606180105",
+                1L,
+                "WAIT_SHIP",
+                "PAID",
+                "UNSHIPPED",
+                "APPLYING",
+                9900,
+                true,
+                List.of(refundItem(507L, 105L, 1, 1, 0, 0, 9900, 0, 9900))
+            )
+        );
+
+        mockMvc.perform(post("/api/aftersales")
+                .header("Authorization", "Bearer " + userToken())
+                .param("userId", "2")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": 105,
+                      "reason": "Forged user id"
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orderId").value(105));
+
+        verify(orderClient).applyAftersale(105L, 1L);
+        verify(orderClient, org.mockito.Mockito.never()).applyAftersale(105L, 2L);
+    }
+
+    @Test
+    void userAftersaleEndpointRejectsAnonymousRequest() throws Exception {
+        mockMvc.perform(post("/api/aftersales")
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": 106,
+                      "reason": "Anonymous request"
+                    }
+                    """))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.message").value("please login first"));
+    }
+
+    @Test
     void createApproveAndReadRefundFlowThroughInternalClients() throws Exception {
         when(orderClient.applyAftersale(100L, 1L)).thenReturn(
             new AftersaleOrderSnapshot(100L, "SO202606180100", 1L, "13800000000", "WAIT_SHIP", "PAID", "NONE", 19900, true)
@@ -95,6 +146,7 @@ class AftersaleServiceIntegrationTest {
         );
 
         mockMvc.perform(post("/api/aftersales")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -171,7 +223,8 @@ class AftersaleServiceIntegrationTest {
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
             .andExpect(jsonPath("$.refundTime").isNotEmpty());
 
-        mockMvc.perform(get("/api/aftersales/{id}", created.getId()))
+        mockMvc.perform(get("/api/aftersales/{id}", created.getId())
+                .header("Authorization", "Bearer " + userToken()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
     }
@@ -200,6 +253,7 @@ class AftersaleServiceIntegrationTest {
         );
 
         mockMvc.perform(post("/api/aftersales")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -256,6 +310,7 @@ class AftersaleServiceIntegrationTest {
         );
 
         mockMvc.perform(post("/api/aftersales")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -320,6 +375,7 @@ class AftersaleServiceIntegrationTest {
         );
 
         mockMvc.perform(post("/api/aftersales")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -387,6 +443,7 @@ class AftersaleServiceIntegrationTest {
         );
 
         mockMvc.perform(post("/api/aftersales")
+                .header("Authorization", "Bearer " + userToken())
                 .contentType(APPLICATION_JSON)
                 .content("""
                     {
@@ -407,6 +464,10 @@ class AftersaleServiceIntegrationTest {
 
     private String adminToken() {
         return authTokenService.issue(1L, "admin", "ADMIN");
+    }
+
+    private String userToken() {
+        return authTokenService.issue(1L, "buyer", "USER");
     }
 
     private com.dwkshop.backend.aftersale.RefundOrderItemSnapshot refundItem(

@@ -334,7 +334,7 @@ Flyway 只执行尚未登记的版本迁移。不要修改已执行的迁移文�
 - 满减优惠券：`满1000减100优惠券`
 - 用户积分账户：可用积分 `5000`
 
-购物车和订单接口会优先使用 `Authorization: Bearer <token>` 中的登录用户；未携带 Token 时仍兼容初始化用户 `userId=1`，也可以通过 query 参数传入 `userId`。
+购物车、订单、售后用户端接口必须携带 `Authorization: Bearer <token>`，后端只使用登录态中的用户 ID，不再接受 query 参数覆盖用户身份。
 
 ## API 概览
 

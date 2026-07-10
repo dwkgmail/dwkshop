@@ -1,5 +1,6 @@
 package com.dwkshop.backend.order;
 
+import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,17 @@ public class ProductCatalogClient {
                 .map(ex -> new ResponseStatusException(response.statusCode(), "Product information is unavailable")))
             .bodyToMono(ProductSkuSnapshot.class)
             .block();
+    }
+
+    public List<InventoryOrderItemStateResponse> getInventoryLockStates(Long orderId) {
+        InventoryOrderItemStateResponse[] states = webClient.get()
+            .uri("/internal/products/orders/{orderId}/inventory-locks", orderId)
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.createException()
+                .map(ex -> new ResponseStatusException(response.statusCode(), "Inventory reservation is unavailable")))
+            .bodyToMono(InventoryOrderItemStateResponse[].class)
+            .block();
+        return states == null ? List.of() : List.of(states);
     }
 
     public LockSkuStockResponse lockSkuStock(Long skuId, int quantity) {

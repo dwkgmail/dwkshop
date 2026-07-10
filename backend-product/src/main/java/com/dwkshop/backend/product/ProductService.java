@@ -5,6 +5,7 @@ import com.dwkshop.backend.domain.entity.ProductCategory;
 import com.dwkshop.backend.domain.entity.ProductNotice;
 import com.dwkshop.backend.domain.entity.ProductRefundCommand;
 import com.dwkshop.backend.domain.entity.ProductSku;
+import com.dwkshop.backend.domain.repository.InventoryOrderItemStateRepository;
 import com.dwkshop.backend.domain.repository.ProductCategoryRepository;
 import com.dwkshop.backend.domain.repository.ProductNoticeRepository;
 import com.dwkshop.backend.domain.repository.ProductRepository;
@@ -12,6 +13,7 @@ import com.dwkshop.backend.domain.repository.ProductRefundCommandRepository;
 import com.dwkshop.backend.domain.repository.ProductSkuRepository;
 import com.dwkshop.backend.product.dto.AdminProductResponse;
 import com.dwkshop.backend.product.dto.CategoryResponse;
+import com.dwkshop.backend.product.dto.InventoryOrderItemStateResponse;
 import com.dwkshop.backend.product.dto.LockSkuStockResponse;
 import com.dwkshop.backend.product.dto.ProductDetailResponse;
 import com.dwkshop.backend.product.dto.ProductSkuRequest;
@@ -58,6 +60,7 @@ public class ProductService {
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductNoticeRepository productNoticeRepository;
     private final ProductRefundCommandRepository productRefundCommandRepository;
+    private final InventoryOrderItemStateRepository inventoryOrderItemStateRepository;
     private final ProductSearchGateway productSearchGateway;
     private final AdminOperationLogService operationLogService;
     private final ObjectMapper objectMapper;
@@ -68,6 +71,7 @@ public class ProductService {
         ProductCategoryRepository productCategoryRepository,
         ProductNoticeRepository productNoticeRepository,
         ProductRefundCommandRepository productRefundCommandRepository,
+        InventoryOrderItemStateRepository inventoryOrderItemStateRepository,
         ProductSearchGateway productSearchGateway,
         AdminOperationLogService operationLogService,
         ObjectMapper objectMapper
@@ -77,6 +81,7 @@ public class ProductService {
         this.productCategoryRepository = productCategoryRepository;
         this.productNoticeRepository = productNoticeRepository;
         this.productRefundCommandRepository = productRefundCommandRepository;
+        this.inventoryOrderItemStateRepository = inventoryOrderItemStateRepository;
         this.productSearchGateway = productSearchGateway;
         this.operationLogService = operationLogService;
         this.objectMapper = objectMapper;
@@ -564,6 +569,13 @@ public class ProductService {
             sku.getSkuStatus(),
             selectable
         );
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryOrderItemStateResponse> getInventoryOrderItemStates(Long orderId) {
+        return inventoryOrderItemStateRepository.findByOrderId(orderId).stream()
+            .map(state -> new InventoryOrderItemStateResponse(state.getSkuId(), state.getQuantity(), state.getState()))
+            .toList();
     }
 
     private Map<String, Object> snapshotProduct(Product product, List<ProductSku> skus, ProductNotice notice) {

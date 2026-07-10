@@ -2,10 +2,12 @@ package com.dwkshop.backend;
 
 import com.dwkshop.backend.domain.entity.Product;
 import com.dwkshop.backend.domain.entity.ProductCategory;
+import com.dwkshop.backend.domain.entity.InventoryOrderItemState;
 import com.dwkshop.backend.domain.entity.ProductNotice;
 import com.dwkshop.backend.domain.entity.ProductRefundCommand;
 import com.dwkshop.backend.domain.entity.ProductSku;
 import com.dwkshop.backend.domain.repository.ProductCategoryRepository;
+import com.dwkshop.backend.domain.repository.InventoryOrderItemStateRepository;
 import com.dwkshop.backend.domain.repository.ProductNoticeRepository;
 import com.dwkshop.backend.domain.repository.ProductRefundCommandRepository;
 import com.dwkshop.backend.domain.repository.ProductRepository;
@@ -50,6 +52,7 @@ class ProductInternalApiIntegrationTest {
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductNoticeRepository productNoticeRepository;
     private final ProductRefundCommandRepository productRefundCommandRepository;
+    private final InventoryOrderItemStateRepository inventoryOrderItemStateRepository;
     private final ProductService productService;
 
     @MockBean
@@ -63,6 +66,7 @@ class ProductInternalApiIntegrationTest {
         ProductCategoryRepository productCategoryRepository,
         ProductNoticeRepository productNoticeRepository,
         ProductRefundCommandRepository productRefundCommandRepository,
+        InventoryOrderItemStateRepository inventoryOrderItemStateRepository,
         ProductService productService
     ) {
         this.mockMvc = mockMvc;
@@ -71,12 +75,14 @@ class ProductInternalApiIntegrationTest {
         this.productCategoryRepository = productCategoryRepository;
         this.productNoticeRepository = productNoticeRepository;
         this.productRefundCommandRepository = productRefundCommandRepository;
+        this.inventoryOrderItemStateRepository = inventoryOrderItemStateRepository;
         this.productService = productService;
     }
 
     @BeforeEach
     void resetState() {
         productRefundCommandRepository.deleteAllInBatch();
+        inventoryOrderItemStateRepository.deleteAllInBatch();
         productNoticeRepository.deleteAllInBatch();
         productSkuRepository.deleteAllInBatch();
         productRepository.deleteAllInBatch();
@@ -130,6 +136,26 @@ class ProductInternalApiIntegrationTest {
         ProductSku sku = productSkuRepository.findById(seededProduct.skuId()).orElseThrow();
         assertThat(sku.getStock()).isEqualTo(1);
         assertThat(sku.getLockedStock()).isZero();
+    }
+
+    @Test
+    void internalInventoryLockStatesExposePersistedReservation() throws Exception {
+        SeededProduct seededProduct = seedProduct("Product Reservation", "SKU-RESERVATION", 120, 10, 2, true, true);
+        InventoryOrderItemState state = new InventoryOrderItemState();
+        state.setOrderId(7001L);
+        state.setSkuId(seededProduct.skuId());
+        state.setQuantity(2);
+        state.setState("LOCKED");
+        state.setLastEventVersion(1);
+        state.setUpdatedAt(LocalDateTime.now());
+        inventoryOrderItemStateRepository.save(state);
+
+        mockMvc.perform(get("/internal/products/orders/{orderId}/inventory-locks", 7001L)
+                .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].skuId").value(seededProduct.skuId()))
+            .andExpect(jsonPath("$[0].quantity").value(2))
+            .andExpect(jsonPath("$[0].state").value("LOCKED"));
     }
 
     @Test

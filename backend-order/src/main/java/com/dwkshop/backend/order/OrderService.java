@@ -42,8 +42,10 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 import org.springframework.data.domain.PageRequest;
@@ -207,7 +209,7 @@ public class OrderService {
 
     public OrderResponse cancel(Long userId, Long orderId) {
         OrderTransition transition = transactionTemplate.execute(status -> {
-            TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
+            TradeOrder order = tradeOrderRepository.findByIdAndUserIdForUpdate(orderId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
             LocalDateTime now = LocalDateTime.now();
             OrderStateMachine.cancelUnpaid(order, now);
@@ -223,7 +225,7 @@ public class OrderService {
 
     public OrderResponse pay(Long userId, Long orderId) {
         OrderTransition transition = transactionTemplate.execute(status -> {
-            TradeOrder order = tradeOrderRepository.findByIdAndUserId(orderId, userId)
+            TradeOrder order = tradeOrderRepository.findByIdAndUserIdForUpdate(orderId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
             if (OrderStateMachine.PAY_PAID.equals(order.getPayStatus())) {
                 return new OrderTransition(toOrderResponse(order), order.getCouponUserId(), 0, false);
@@ -233,6 +235,7 @@ public class OrderService {
                 expirePayment(order, now);
                 return new OrderTransition(null, order.getCouponUserId(), pointDiscountPoints(order), true);
             }
+            requireInventoryReservation(order);
             OrderStateMachine.pay(order, now);
             tradeOrderRepository.save(order);
             inventoryOutbox.append(order, tradeOrderItemRepository.findByOrderId(orderId),
@@ -263,7 +266,7 @@ public class OrderService {
         int closed = 0;
         for (Long orderId : orderIds) {
             ExpiredOrderTransition transition = transactionTemplate.execute(status -> {
-                TradeOrder order = tradeOrderRepository.findById(orderId).orElse(null);
+                TradeOrder order = tradeOrderRepository.findByIdForUpdate(orderId).orElse(null);
                 if (order == null || !isPaymentExpired(order, now)) {
                     return ExpiredOrderTransition.unchanged();
                 }
@@ -317,6 +320,7 @@ public class OrderService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "订单当前状态不可支付");
         }
 
+        requireInventoryReservation(order);
         PaymentOrder paymentOrder = resolvePaymentOrder(request, order, now);
         LocalDateTime paidAt = request.paidAt() == null ? now : request.paidAt();
         OrderStateMachine.pay(order, paidAt);
@@ -366,13 +370,13 @@ public class OrderService {
         if (paymentNo != null) {
             PaymentOrder paymentOrder = paymentOrderRepository.findByPaymentNo(paymentNo)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "支付单不存在"));
-            return tradeOrderRepository.findById(paymentOrder.getOrderId())
+            return tradeOrderRepository.findByIdForUpdate(paymentOrder.getOrderId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
         }
         if (request.orderId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "orderId或paymentNo不能为空");
         }
-        return tradeOrderRepository.findById(request.orderId())
+        return tradeOrderRepository.findByIdForUpdate(request.orderId())
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "订单不存在"));
     }
 
@@ -877,6 +881,32 @@ public class OrderService {
             releaseCouponIfPresent(userId, userCouponId, orderId);
         } catch (RuntimeException ignored) {
             // Best-effort compensation after local order creation fails.
+        }
+    }
+
+    private void requireInventoryReservation(TradeOrder order) {
+        Map<Long, Integer> expectedQuantities = new HashMap<>();
+        for (TradeOrderItem item : tradeOrderItemRepository.findByOrderId(order.getId())) {
+            expectedQuantities.merge(item.getSkuId(), item.getQuantity(), Integer::sum);
+        }
+        if (expectedQuantities.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Inventory reservation is pending");
+        }
+
+        Map<Long, InventoryOrderItemStateResponse> statesBySku = new HashMap<>();
+        for (InventoryOrderItemStateResponse state : productCatalogClient.getInventoryLockStates(order.getId())) {
+            if (state != null && state.skuId() != null) {
+                statesBySku.put(state.skuId(), state);
+            }
+        }
+        for (Map.Entry<Long, Integer> expected : expectedQuantities.entrySet()) {
+            InventoryOrderItemStateResponse state = statesBySku.get(expected.getKey());
+            boolean reserved = state != null
+                && expected.getValue().equals(state.quantity())
+                && ("LOCKED".equals(state.state()) || "PAID".equals(state.state()));
+            if (!reserved) {
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Inventory reservation is pending");
+            }
         }
     }
 

@@ -19,6 +19,7 @@ import com.dwkshop.backend.order.MarketingCouponSelection;
 import com.dwkshop.backend.order.MemberAddress;
 import com.dwkshop.backend.order.MemberClient;
 import com.dwkshop.backend.order.MemberPointAccount;
+import com.dwkshop.backend.order.InventoryOrderItemStateResponse;
 import com.dwkshop.backend.order.OrderService;
 import com.dwkshop.backend.order.ProductCatalogClient;
 import com.dwkshop.backend.order.ProductSkuSnapshot;
@@ -82,6 +83,12 @@ class OrderBusinessFlowIntegrationTest {
         when(memberClient.resolveAddress(eq(1L), eq(10L))).thenReturn(address());
         when(memberClient.getPointAccount(1L)).thenReturn(new MemberPointAccount(1L, 0));
         when(marketingClient.selectCoupon(eq(1L), eq(null), anyInt())).thenReturn(new MarketingCouponSelection(null, 0, List.of()));
+        when(productCatalogClient.getInventoryLockStates(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(invocation -> {
+            Long orderId = invocation.getArgument(0);
+            return tradeOrderItemRepository.findByOrderId(orderId).stream()
+                .map(item -> new InventoryOrderItemStateResponse(item.getSkuId(), item.getQuantity(), "LOCKED"))
+                .toList();
+        });
     }
 
     @Test
@@ -550,6 +557,35 @@ class OrderBusinessFlowIntegrationTest {
                     }
                     """.formatted(orderId)))
             .andExpect(status().isBadRequest());
+
+        TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
+        assertThat(order.getOrderStatus()).isEqualTo("WAIT_PAY");
+        assertThat(order.getPayStatus()).isEqualTo("UNPAID");
+        assertThat(paymentTransactionRepository.count()).isZero();
+        assertThat(orderOutboxEventRepository.count()).isZero();
+    }
+
+    @Test
+    void paymentEndpointsWaitForInventoryReservationBeforeMarkingOrderPaid() throws Exception {
+        Long orderId = seedUnpaidOrder("SO202606260004", 1600);
+        when(productCatalogClient.getInventoryLockStates(orderId)).thenReturn(List.of());
+
+        mockMvc.perform(post("/api/orders/{orderId}/pay", orderId)
+                .header("Authorization", "Bearer " + userToken()))
+            .andExpect(status().isServiceUnavailable());
+
+        mockMvc.perform(post("/internal/orders/payments/callback")
+                .header(InternalServiceAuthConfig.INTERNAL_SECRET_HEADER, INTERNAL_SECRET)
+                .contentType(APPLICATION_JSON)
+                .content("""
+                    {
+                      "orderId": %d,
+                      "channel": "WECHAT",
+                      "channelTradeNo": "wx-trade-inventory-pending",
+                      "amount": 1600
+                    }
+                    """.formatted(orderId)))
+            .andExpect(status().isServiceUnavailable());
 
         TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
         assertThat(order.getOrderStatus()).isEqualTo("WAIT_PAY");

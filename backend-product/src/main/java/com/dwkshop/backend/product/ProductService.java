@@ -31,9 +31,11 @@ import com.dwkshop.backend.search.ProductSearchGateway;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -49,6 +51,7 @@ public class ProductService {
     private static final String OFF_SALE = "OFF_SALE";
     private static final String NORMAL = "NORMAL";
     private static final String ENABLED = "ENABLED";
+    private static final String DISABLED = "DISABLED";
 
     private final ProductRepository productRepository;
     private final ProductSkuRepository productSkuRepository;
@@ -233,15 +236,13 @@ public class ProductService {
         Product product = productRepository.findById(id)
             .filter(item -> !Boolean.TRUE.equals(item.getDeletedFlag()))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "商品不存在"));
-        List<ProductSku> beforeSkus = productSkuRepository.findByProductId(id);
+        List<ProductSku> beforeSkus = productSkuRepository.findByProductIdForUpdate(id);
         ProductNotice beforeNotice = productNoticeRepository.findByProductIdAndEnabledFlagTrue(id).orElse(null);
         Map<String, Object> beforeSnapshot = snapshotProduct(product, beforeSkus, beforeNotice);
         LocalDateTime now = LocalDateTime.now();
         applyProductRequest(product, request, now, false);
         Product saved = productRepository.save(product);
-        productSkuRepository.deleteByProductId(saved.getId());
-        productSkuRepository.flush();
-        List<ProductSku> skus = saveSkus(saved.getId(), request.skus(), now);
+        List<ProductSku> skus = updateSkus(saved.getId(), beforeSkus, request.skus(), now);
         ProductNotice notice = saveNotice(saved.getId(), request.noticeTitle(), request.noticeContent(), now);
         productSearchGateway.indexProduct(saved);
         operationLogService.record("PRODUCT_UPDATE", "PRODUCT", saved.getId(), beforeSnapshot, snapshotProduct(saved, skus, notice), "更新商品");
@@ -341,23 +342,87 @@ public class ProductService {
     }
 
     private List<ProductSku> saveSkus(Long productId, List<ProductSkuRequest> requests, LocalDateTime now) {
+        Set<String> submittedSkuCodes = new HashSet<>();
         return requests.stream().map(request -> {
-            // 每次提交都按请求内容重建 SKU，保证数据库状态和后台表单一致。
+            // New product requests always create fresh SKU records.
             ProductSku sku = new ProductSku();
-            sku.setProductId(productId);
-            sku.setSkuCode(blankToDefault(request.skuCode(), "SKU-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase()));
-            sku.setSkuName(request.skuName().trim());
-            sku.setSpecJson(request.specJson());
-            sku.setImageUrl(request.imageUrl());
-            sku.setSalePrice(request.salePrice());
-            sku.setLinePrice(request.linePrice());
-            sku.setStock(request.stock());
-            sku.setLockedStock(0);
-            sku.setSkuStatus(blankToDefault(request.skuStatus(), ENABLED));
-            sku.setCreatedAt(now);
-            sku.setUpdatedAt(now);
+            if (request.id() != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "New product SKU must not specify an id");
+            }
+            applySkuRequest(sku, productId, request, now, false, submittedSkuCodes);
             return productSkuRepository.save(sku);
         }).toList();
+    }
+
+    private List<ProductSku> updateSkus(Long productId, List<ProductSku> existingSkus,
+        List<ProductSkuRequest> requests, LocalDateTime now) {
+        Map<Long, ProductSku> existingById = existingSkus.stream()
+            .collect(Collectors.toMap(ProductSku::getId, Function.identity()));
+        Map<String, ProductSku> existingByCode = existingSkus.stream()
+            .collect(Collectors.toMap(ProductSku::getSkuCode, Function.identity()));
+        Set<Long> retainedSkuIds = new HashSet<>();
+        Set<String> submittedSkuCodes = new HashSet<>();
+
+        for (ProductSkuRequest request : requests) {
+            ProductSku sku = resolveExistingSku(request, existingById, existingByCode);
+            boolean existing = sku != null;
+            if (!existing) {
+                sku = new ProductSku();
+            } else if (!retainedSkuIds.add(sku.getId())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate SKU in product update");
+            }
+            applySkuRequest(sku, productId, request, now, existing, submittedSkuCodes);
+            productSkuRepository.save(sku);
+        }
+
+        for (ProductSku sku : existingSkus) {
+            if (!retainedSkuIds.contains(sku.getId()) && !DISABLED.equals(sku.getSkuStatus())) {
+                sku.setSkuStatus(DISABLED);
+                sku.setUpdatedAt(now);
+                productSkuRepository.save(sku);
+            }
+        }
+        return productSkuRepository.findByProductId(productId);
+    }
+
+    private ProductSku resolveExistingSku(ProductSkuRequest request, Map<Long, ProductSku> existingById,
+        Map<String, ProductSku> existingByCode) {
+        if (request.id() != null) {
+            ProductSku sku = existingById.get(request.id());
+            if (sku == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "SKU does not belong to this product");
+            }
+            return sku;
+        }
+        return isBlank(request.skuCode()) ? null : existingByCode.get(request.skuCode().trim());
+    }
+
+    private void applySkuRequest(ProductSku sku, Long productId, ProductSkuRequest request, LocalDateTime now,
+        boolean existing, Set<String> submittedSkuCodes) {
+        String skuCode = blankToDefault(request.skuCode(), existing ? sku.getSkuCode()
+            : "SKU-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+        if (!submittedSkuCodes.add(skuCode)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate SKU code in product update");
+        }
+        productSkuRepository.findBySkuCode(skuCode)
+            .filter(found -> !found.getId().equals(sku.getId()))
+            .ifPresent(found -> {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "SKU code is already in use");
+            });
+        sku.setProductId(productId);
+        sku.setSkuCode(skuCode);
+        sku.setSkuName(request.skuName().trim());
+        sku.setSpecJson(request.specJson());
+        sku.setImageUrl(request.imageUrl());
+        sku.setSalePrice(request.salePrice());
+        sku.setLinePrice(request.linePrice());
+        sku.setStock(request.stock());
+        if (!existing) {
+            sku.setLockedStock(0);
+            sku.setCreatedAt(now);
+        }
+        sku.setSkuStatus(blankToDefault(request.skuStatus(), existing ? sku.getSkuStatus() : ENABLED));
+        sku.setUpdatedAt(now);
     }
 
     private ProductNotice saveNotice(Long productId, String title, String content, LocalDateTime now) {
@@ -617,7 +682,7 @@ public class ProductService {
         return items.stream().map(item -> {
             ProductSku sku = productSkuRepository.findByIdForUpdate(item.skuId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格不存在"));
-            if (!ENABLED.equals(sku.getSkuStatus())) {
+            if (!ENABLED.equals(sku.getSkuStatus()) && !DISABLED.equals(sku.getSkuStatus())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
             }
             if (sku.getLockedStock() < item.quantity()) {
@@ -644,7 +709,7 @@ public class ProductService {
         return items.stream().map(item -> {
             ProductSku sku = productSkuRepository.findByIdForUpdate(item.skuId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品规格不存在"));
-            if (!ENABLED.equals(sku.getSkuStatus())) {
+            if (!ENABLED.equals(sku.getSkuStatus()) && !DISABLED.equals(sku.getSkuStatus())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "部分商品规格已失效，请重新选择");
             }
             if (sku.getStock() < item.quantity()) {
@@ -692,6 +757,7 @@ public class ProductService {
 
     private Integer minSalePrice(List<ProductSku> skus) {
         return skus.stream()
+            .filter(sku -> ENABLED.equals(sku.getSkuStatus()))
             .min(Comparator.comparing(ProductSku::getSalePrice))
             .map(ProductSku::getSalePrice)
             .orElse(null);

@@ -149,6 +149,9 @@ class ProductInternalApiIntegrationTest {
     @Test
     void refundCommandsAreIdempotentPerCommandNo() throws Exception {
         SeededProduct seededProduct = seedProduct("Product B", "SKU-B", 8800, 10, 4, true, false);
+        ProductSku disabledSku = productSkuRepository.findById(seededProduct.skuId()).orElseThrow();
+        disabledSku.setSkuStatus("DISABLED");
+        productSkuRepository.save(disabledSku);
 
         String releasePayload = """
             {
@@ -207,6 +210,7 @@ class ProductInternalApiIntegrationTest {
         ProductSku sku = productSkuRepository.findById(seededProduct.skuId()).orElseThrow();
         assertThat(sku.getStock()).isEqualTo(11);
         assertThat(sku.getLockedStock()).isEqualTo(3);
+        assertThat(sku.getSkuStatus()).isEqualTo("DISABLED");
 
         List<ProductRefundCommand> commands = productRefundCommandRepository.findAll();
         assertThat(commands).hasSize(2);
@@ -231,8 +235,8 @@ class ProductInternalApiIntegrationTest {
     }
 
     @Test
-    void adminUpdateProductCanReuseExistingSkuCode() {
-        SeededProduct seededProduct = seedProduct("Product Editable", "SKU-EDITABLE", 8800, 10, 0, true, true);
+    void adminUpdateProductPreservesExistingSkuIdentityAndDisablesRemovedSkus() {
+        SeededProduct seededProduct = seedProduct("Product Editable", "SKU-EDITABLE", 8800, 10, 2, true, true);
 
         productService.updateProduct(seededProduct.productId(), new ProductUpsertRequest(
             seededProduct.categoryId(),
@@ -254,6 +258,7 @@ class ProductInternalApiIntegrationTest {
             "Buyer Guide",
             "Updated notice.",
             List.of(new ProductSkuRequest(
+                seededProduct.skuId(),
                 "SKU-SKU-EDITABLE",
                 "SKU-EDITABLE",
                 "{\"color\":\"black\"}",
@@ -267,9 +272,27 @@ class ProductInternalApiIntegrationTest {
 
         List<ProductSku> skus = productSkuRepository.findByProductId(seededProduct.productId());
         assertThat(skus).hasSize(1);
+        assertThat(skus.get(0).getId()).isEqualTo(seededProduct.skuId());
         assertThat(skus.get(0).getSkuCode()).isEqualTo("SKU-SKU-EDITABLE");
         assertThat(skus.get(0).getSalePrice()).isEqualTo(9900);
         assertThat(skus.get(0).getStock()).isEqualTo(12);
+        assertThat(skus.get(0).getLockedStock()).isEqualTo(2);
+
+        productService.updateProduct(seededProduct.productId(), new ProductUpsertRequest(
+            seededProduct.categoryId(), "P-PRODUCT-EDITABLE", "Product Editable Updated", "Brand", "Updated subtitle",
+            "/images/product-editable.png", "NORMAL", "ON_SALE", "NORMAL", true, true, true, true,
+            false, 0, 3, "Buyer Guide", "Updated notice.", List.of(new ProductSkuRequest(
+                null, "SKU-EDITABLE-REPLACEMENT", "Replacement", "{\"color\":\"white\"}",
+                "/images/sku-replacement.png", 10900, 11900, 6, "ENABLED"
+            ))
+        ));
+
+        ProductSku originalSku = productSkuRepository.findById(seededProduct.skuId()).orElseThrow();
+        assertThat(originalSku.getSkuStatus()).isEqualTo("DISABLED");
+        assertThat(originalSku.getLockedStock()).isEqualTo(2);
+        assertThat(productSkuRepository.findByProductId(seededProduct.productId()))
+            .extracting(ProductSku::getSkuCode)
+            .containsExactlyInAnyOrder("SKU-SKU-EDITABLE", "SKU-EDITABLE-REPLACEMENT");
     }
 
     private SeededProduct seedProduct(

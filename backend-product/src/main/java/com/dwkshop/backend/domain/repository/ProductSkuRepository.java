@@ -15,7 +15,13 @@ public interface ProductSkuRepository extends JpaRepository<ProductSku, Long> {
 
     List<ProductSku> findByProductId(Long productId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select sku from ProductSku sku where sku.productId = :productId")
+    List<ProductSku> findByProductIdForUpdate(@Param("productId") Long productId);
+
     List<ProductSku> findByProductIdIn(Collection<Long> productIds);
+
+    Optional<ProductSku> findBySkuCode(String skuCode);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select sku from ProductSku sku where sku.id = :id")

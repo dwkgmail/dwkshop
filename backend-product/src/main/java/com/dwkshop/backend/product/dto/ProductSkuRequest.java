@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 public record ProductSkuRequest(
+    Long id,
     String skuCode,
     @NotBlank String skuName,
     @NotBlank String specJson,

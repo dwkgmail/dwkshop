@@ -145,6 +145,50 @@ class InventoryIntegrationEventConsumerTest {
             .isEqualTo("RELEASED");
     }
 
+    @Test
+    void paymentBeforeCreationLocksStockWhenTheLateCreationEventArrives() {
+        ProductSku sku = sku(10, 0);
+
+        consumer.consume(event("pay-first", InventoryIntegrationEvent.PAYMENT_SUCCEEDED, 2, 402L, sku.getId(), 2));
+
+        ProductSku beforeLock = skuRepository.findById(sku.getId()).orElseThrow();
+        assertThat(beforeLock.getStock()).isEqualTo(10);
+        assertThat(beforeLock.getLockedStock()).isZero();
+        assertThat(stateRepository.findByOrderIdAndSkuId(402L, sku.getId()).orElseThrow().getState())
+            .isEqualTo("PAYMENT_PENDING");
+
+        consumer.consume(event("create-late", InventoryIntegrationEvent.ORDER_CREATED, 1, 402L, sku.getId(), 2));
+
+        ProductSku result = skuRepository.findById(sku.getId()).orElseThrow();
+        assertThat(result.getStock()).isEqualTo(8);
+        assertThat(result.getLockedStock()).isEqualTo(2);
+        assertThat(stateRepository.findByOrderIdAndSkuId(402L, sku.getId()).orElseThrow().getState())
+            .isEqualTo("PAID");
+    }
+
+    @Test
+    void lateCreationIsRetriedWhenPaymentPendingStockIsInsufficient() {
+        ProductSku sku = sku(1, 0);
+        consumer.consume(event("pay-first-retry", InventoryIntegrationEvent.PAYMENT_SUCCEEDED, 2, 403L, sku.getId(), 2));
+
+        assertThatThrownBy(() -> consumer.consume(event("create-late-retry", InventoryIntegrationEvent.ORDER_CREATED, 1, 403L, sku.getId(), 2)))
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(consumedRepository.count()).isEqualTo(1);
+        assertThat(stateRepository.findByOrderIdAndSkuId(403L, sku.getId()).orElseThrow().getState())
+            .isEqualTo("PAYMENT_PENDING");
+
+        ProductSku replenished = skuRepository.findById(sku.getId()).orElseThrow();
+        replenished.setStock(5);
+        skuRepository.save(replenished);
+        consumer.consume(event("create-late-retry", InventoryIntegrationEvent.ORDER_CREATED, 1, 403L, sku.getId(), 2));
+
+        ProductSku result = skuRepository.findById(sku.getId()).orElseThrow();
+        assertThat(result.getStock()).isEqualTo(3);
+        assertThat(result.getLockedStock()).isEqualTo(2);
+        assertThat(stateRepository.findByOrderIdAndSkuId(403L, sku.getId()).orElseThrow().getState())
+            .isEqualTo("PAID");
+    }
+
     private InventoryIntegrationEvent event(String id, String type, int version, Long orderId, Long skuId, int quantity) {
         return new InventoryIntegrationEvent(id, type, version, orderId, "SO-" + orderId,
             LocalDateTime.now(), List.of(new InventoryIntegrationEvent.Item(skuId, quantity)));

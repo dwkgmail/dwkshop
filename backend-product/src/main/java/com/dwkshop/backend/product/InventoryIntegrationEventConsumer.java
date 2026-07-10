@@ -42,7 +42,11 @@ public class InventoryIntegrationEventConsumer {
             || consumedRepository.existsByOrderIdAndSkuIdAndEventType(event.orderId(), item.skuId(), event.eventType())) return;
 
         InventoryOrderItemState state = stateRepository.findByOrderIdAndSkuId(event.orderId(), item.skuId()).orElse(null);
-        boolean stale = state != null && event.eventVersion() < state.getLastEventVersion();
+        // A payment callback can overtake the order-created message. Keep that payment
+        // pending until the late lock event has successfully reserved stock.
+        boolean pendingPaymentLock = state != null && "PAYMENT_PENDING".equals(state.getState())
+            && InventoryIntegrationEvent.ORDER_CREATED.equals(event.eventType());
+        boolean stale = state != null && event.eventVersion() < state.getLastEventVersion() && !pendingPaymentLock;
         if (!stale) {
             if (InventoryIntegrationEvent.ORDER_CREATED.equals(event.eventType())) lock(state, event, item);
             else if (InventoryIntegrationEvent.PAYMENT_SUCCEEDED.equals(event.eventType())) markPaid(state, event, item);
@@ -54,18 +58,27 @@ public class InventoryIntegrationEventConsumer {
     }
 
     private void lock(InventoryOrderItemState state, InventoryIntegrationEvent event, InventoryIntegrationEvent.Item item) {
-        if (state != null && ("LOCKED".equals(state.getState()) || "RELEASED".equals(state.getState()))) return;
+        if (state != null && ("LOCKED".equals(state.getState())
+            || "PAID".equals(state.getState()) || "RELEASED".equals(state.getState()))) return;
         ProductSku sku = loadSku(item.skuId());
         if (sku.getStock() < item.quantity()) throw new IllegalStateException("Insufficient stock for sku " + item.skuId());
         sku.setStock(sku.getStock() - item.quantity());
         sku.setLockedStock(sku.getLockedStock() + item.quantity());
         sku.setUpdatedAt(LocalDateTime.now());
         skuRepository.save(sku);
+        if (state != null && "PAYMENT_PENDING".equals(state.getState())) {
+            saveState(state, event, item, "PAID", Math.max(state.getLastEventVersion(), event.eventVersion()));
+            return;
+        }
         saveState(state, event, item, "LOCKED");
     }
 
     private void markPaid(InventoryOrderItemState state, InventoryIntegrationEvent event, InventoryIntegrationEvent.Item item) {
-        if (state == null || "RELEASED".equals(state.getState())) {
+        if (state == null) {
+            saveState(null, event, item, "PAYMENT_PENDING");
+            return;
+        }
+        if ("RELEASED".equals(state.getState())) {
             saveState(state, event, item, "RELEASED");
             return;
         }
@@ -73,6 +86,7 @@ public class InventoryIntegrationEventConsumer {
             saveState(state, event, item, "PAID");
             return;
         }
+        if ("PAYMENT_PENDING".equals(state.getState())) return;
         throw new IllegalStateException("Order item is not payable for sku " + item.skuId());
     }
 
@@ -97,12 +111,17 @@ public class InventoryIntegrationEventConsumer {
 
     private void saveState(InventoryOrderItemState state, InventoryIntegrationEvent event,
         InventoryIntegrationEvent.Item item, String value) {
+        saveState(state, event, item, value, event.eventVersion());
+    }
+
+    private void saveState(InventoryOrderItemState state, InventoryIntegrationEvent event,
+        InventoryIntegrationEvent.Item item, String value, int lastEventVersion) {
         InventoryOrderItemState target = state == null ? new InventoryOrderItemState() : state;
         target.setOrderId(event.orderId());
         target.setSkuId(item.skuId());
         target.setQuantity(item.quantity());
         target.setState(value);
-        target.setLastEventVersion(event.eventVersion());
+        target.setLastEventVersion(lastEventVersion);
         target.setUpdatedAt(LocalDateTime.now());
         stateRepository.save(target);
     }

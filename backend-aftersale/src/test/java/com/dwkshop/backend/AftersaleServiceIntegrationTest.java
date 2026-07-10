@@ -172,14 +172,11 @@ class AftersaleServiceIntegrationTest {
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"))
             .andExpect(jsonPath("$.refundTime").doesNotExist());
 
-        AftersaleOutboxEvent outbox = outboxEventRepository.findAll().get(0);
-        assertThat(outbox.getPublishStatus()).isEqualTo("PENDING");
-        assertThat(outbox.getEventType()).isEqualTo("REFUND_APPROVED");
-        assertThat(outbox.getPayloadJson()).contains(created.getAftersaleNo()).contains("\"skuId\":501").contains("\"quantity\":2");
+        assertThat(outboxEventRepository.findAll()).isEmpty();
 
         AftersaleRefundFlow flow = refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow();
         assertThat(flow.getFlowStatus()).isEqualTo("REFUNDING");
-        assertThat(flow.getCurrentStep()).isEqualTo("EVENT_PENDING");
+        assertThat(flow.getCurrentStep()).isEqualTo("PAYMENT_PENDING");
         assertThat(flow.getRetryCount()).isEqualTo(0);
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/fail", created.getId())
@@ -209,10 +206,10 @@ class AftersaleServiceIntegrationTest {
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"))
             .andExpect(jsonPath("$.rejectReason").doesNotExist());
 
-        assertThat(outboxEventRepository.findAll()).hasSize(1);
+        assertThat(outboxEventRepository.findAll()).isEmpty();
         flow = refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow();
         assertThat(flow.getFlowStatus()).isEqualTo("REFUNDING");
-        assertThat(flow.getCurrentStep()).isEqualTo("EVENT_PENDING");
+        assertThat(flow.getCurrentStep()).isEqualTo("PAYMENT_PENDING");
         assertThat(flow.getRetryCount()).isEqualTo(1);
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", created.getId())
@@ -223,6 +220,19 @@ class AftersaleServiceIntegrationTest {
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"))
             .andExpect(jsonPath("$.refundTime").isNotEmpty());
 
+        AftersaleOutboxEvent outbox = outboxEventRepository.findAll().get(0);
+        assertThat(outbox.getPublishStatus()).isEqualTo("PENDING");
+        assertThat(outbox.getEventType()).isEqualTo("REFUND_APPROVED");
+        assertThat(outbox.getPayloadJson()).contains(created.getAftersaleNo()).contains("\"skuId\":501").contains("\"quantity\":2");
+
+        mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", created.getId())
+                .header("Authorization", "Bearer " + adminToken())
+                .header("X-Admin-Confirm", "true")
+                .header("X-Admin-Reason", "test duplicate complete"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+        assertThat(outboxEventRepository.findAll()).hasSize(1);
+
         mockMvc.perform(get("/api/aftersales/{id}", created.getId())
                 .header("Authorization", "Bearer " + userToken()))
             .andExpect(status().isOk())
@@ -230,7 +240,7 @@ class AftersaleServiceIntegrationTest {
     }
 
     @Test
-    void duplicateRefundApprovalReturnsRefundedStateAndDoesNotAppendAnotherOutboxEvent() throws Exception {
+    void duplicateApprovalDoesNotPublishInventoryEventBeforeRefundCompletion() throws Exception {
         when(orderClient.applyAftersale(102L, 1L)).thenReturn(
             new AftersaleOrderSnapshot(102L, "SO202606180102", 1L, "13800000002", "WAIT_SHIP", "PAID", "NONE", 9900, true)
         );
@@ -280,7 +290,7 @@ class AftersaleServiceIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
 
-        assertThat(outboxEventRepository.findAll()).hasSize(1);
+        assertThat(outboxEventRepository.findAll()).isEmpty();
         assertThat(refundFlowRepository.findByAftersaleId(created.getId()).orElseThrow().getFlowStatus())
             .isEqualTo("REFUNDING");
         verify(orderClient, times(2)).getRefundContext(102L);
@@ -341,7 +351,7 @@ class AftersaleServiceIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDING"));
 
-        assertThat(outboxEventRepository.findAll()).hasSize(1);
+        assertThat(outboxEventRepository.findAll()).isEmpty();
 
         mockMvc.perform(post("/admin/aftersales/{id}/refund/complete", created.getId())
                 .header("Authorization", "Bearer " + adminToken())
@@ -349,6 +359,8 @@ class AftersaleServiceIntegrationTest {
                 .header("X-Admin-Reason", "test complete"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.aftersaleStatus").value("REFUNDED"));
+
+        assertThat(outboxEventRepository.findAll()).hasSize(1);
     }
 
     @Test

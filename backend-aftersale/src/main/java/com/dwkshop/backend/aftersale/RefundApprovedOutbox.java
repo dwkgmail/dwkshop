@@ -23,7 +23,7 @@ public class RefundApprovedOutbox {
         this.objectMapper = objectMapper;
     }
 
-    public void append(AftersaleOrder aftersale, RefundOrderContext context, List<AftersaleOrderItem> refundItems, LocalDateTime approvedAt) {
+    public void append(AftersaleOrder aftersale, String orderStatus, List<AftersaleOrderItem> refundItems, LocalDateTime refundedAt) {
         if (repository.existsByAggregateIdAndEventType(aftersale.getId(), EVENT_TYPE)) {
             return;
         }
@@ -33,7 +33,7 @@ public class RefundApprovedOutbox {
             .toList();
         RefundApprovedEvent event = new RefundApprovedEvent(
             eventId, aftersale.getAftersaleNo() + "-RELEASE", aftersale.getId(), aftersale.getAftersaleNo(),
-            aftersale.getOrderId(), context.orderStatus(), aftersale.getRefundScope(), aftersale.getRefundAmount(), approvedAt, items
+            aftersale.getOrderId(), orderStatus, aftersale.getRefundScope(), aftersale.getRefundAmount(), refundedAt, items
         );
         AftersaleOutboxEvent outbox = new AftersaleOutboxEvent();
         outbox.setEventId(eventId);
@@ -42,21 +42,10 @@ public class RefundApprovedOutbox {
         outbox.setPayloadJson(write(event));
         outbox.setPublishStatus("PENDING");
         outbox.setRetryCount(0);
-        outbox.setNextRetryAt(approvedAt);
-        outbox.setCreatedAt(approvedAt);
-        outbox.setUpdatedAt(approvedAt);
+        outbox.setNextRetryAt(refundedAt);
+        outbox.setCreatedAt(refundedAt);
+        outbox.setUpdatedAt(refundedAt);
         repository.save(outbox);
-    }
-
-    public void retry(AftersaleOrder aftersale, LocalDateTime retryAt) {
-        repository.findByAggregateIdAndEventType(aftersale.getId(), EVENT_TYPE)
-            .ifPresent(outbox -> {
-                outbox.setPublishStatus("PENDING");
-                outbox.setNextRetryAt(retryAt);
-                outbox.setLastError(null);
-                outbox.setUpdatedAt(retryAt);
-                repository.save(outbox);
-            });
     }
 
     private String write(RefundApprovedEvent event) {

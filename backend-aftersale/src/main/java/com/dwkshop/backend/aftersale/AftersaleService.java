@@ -41,7 +41,7 @@ public class AftersaleService {
     private static final String FLOW_COMPLETED = "COMPLETED";
     private static final String FLOW_FAILED = "FAILED";
     private static final String STEP_WAIT_RETURN = "WAIT_RETURN";
-    private static final String STEP_EVENT_PENDING = "EVENT_PENDING";
+    private static final String STEP_PAYMENT_PENDING = "PAYMENT_PENDING";
     private static final String REFUND_ONLY = "REFUND_ONLY";
     private static final String RETURN_AND_REFUND = "RETURN_AND_REFUND";
     private static final String EXCHANGE = "EXCHANGE";
@@ -153,7 +153,7 @@ public class AftersaleService {
             saveFlow(loadOrCreateFlow(aftersale), FLOW_APPROVED, STEP_WAIT_RETURN, 0, null);
             return toResponse(aftersale, approvedOrderSnapshot(orderContext, WAIT_RETURN, "PAID"));
         }
-        startRefunding(aftersale, orderContext, now);
+        startRefunding(aftersale, now);
         return toResponse(aftersale, approvedOrderSnapshot(orderContext, REFUNDING, "PAID"));
     }
 
@@ -175,7 +175,7 @@ public class AftersaleService {
         aftersale.setAftersaleStatus(RETURNED);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
-        startRefunding(aftersale, orderContext, now);
+        startRefunding(aftersale, now);
         return toResponse(aftersale, approvedOrderSnapshot(orderContext, REFUNDING, "PAID"));
     }
 
@@ -195,6 +195,8 @@ public class AftersaleService {
         aftersale.setRefundTime(now);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
+        refundApprovedOutbox.append(aftersale, order.orderStatus(),
+            aftersaleOrderItemRepository.findByAftersaleIdOrderById(aftersale.getId()), now);
         saveFlow(loadOrCreateFlow(aftersale), FLOW_COMPLETED, "DONE", 0, null);
         return toResponse(aftersale, order);
     }
@@ -236,8 +238,7 @@ public class AftersaleService {
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
         AftersaleRefundFlow flow = loadOrCreateFlow(aftersale);
-        refundApprovedOutbox.retry(aftersale, now);
-        saveFlow(flow, FLOW_REFUNDING, STEP_EVENT_PENDING, flow.getRetryCount() + 1, null);
+        saveFlow(flow, FLOW_REFUNDING, STEP_PAYMENT_PENDING, flow.getRetryCount() + 1, null);
         return toResponse(aftersale);
     }
 
@@ -376,13 +377,11 @@ public class AftersaleService {
         return base + "-" + action.toUpperCase();
     }
 
-    private void startRefunding(AftersaleOrder aftersale, RefundOrderContext orderContext, LocalDateTime now) {
+    private void startRefunding(AftersaleOrder aftersale, LocalDateTime now) {
         aftersale.setAftersaleStatus(REFUNDING);
         aftersale.setUpdatedAt(now);
         aftersaleOrderRepository.save(aftersale);
-        List<AftersaleOrderItem> items = aftersaleOrderItemRepository.findByAftersaleIdOrderById(aftersale.getId());
-        refundApprovedOutbox.append(aftersale, orderContext, items, now);
-        saveFlow(loadOrCreateFlow(aftersale), FLOW_REFUNDING, STEP_EVENT_PENDING, 0, null);
+        saveFlow(loadOrCreateFlow(aftersale), FLOW_REFUNDING, STEP_PAYMENT_PENDING, 0, null);
     }
 
     private boolean requiresReturn(AftersaleOrder aftersale) {

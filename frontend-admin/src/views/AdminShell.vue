@@ -240,6 +240,41 @@ const dashboard = computed(() => {
   };
 });
 
+const recentOrders = computed(() => orders.value.slice(0, 3));
+
+const lowStockProducts = computed(() => products.value.filter((item) => item.stock <= 20).slice(0, 3));
+
+const salesTrend = computed(() => {
+  const today = new Date();
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (6 - index));
+    const key = date.toISOString().slice(0, 10);
+    const value = orders.value
+      .filter((order) => order.createdAt?.slice(0, 10) === key)
+      .reduce((sum, order) => sum + order.payAmount, 0);
+    return { label: index === 6 ? '今日' : key.slice(5).replace('-', '/'), value };
+  });
+  const max = Math.max(...days.map((item) => item.value), 1);
+  return days.map((item) => ({ ...item, height: Math.max(24, Math.round((item.value / max) * 142)) }));
+});
+
+const orderStats = computed(() => ({
+  all: orders.value.length,
+  waitPay: orders.value.filter((item) => item.orderStatus === 'WAIT_PAY').length,
+  waitShip: orders.value.filter((item) => item.orderStatus === 'WAIT_SHIP').length,
+  aftersale: orders.value.filter((item) => item.aftersaleStatus && item.aftersaleStatus !== 'NONE').length
+}));
+
+const inventoryStats = computed(() => {
+  const items = inventoryReport.value?.items ?? [];
+  return {
+    diff: items.filter((item) => Number(item.difference) !== 0).length,
+    locked: items.reduce((sum, item) => sum + Number(item.actualLockedStock ?? 0), 0),
+    repairable: items.filter((item) => item.autoRepairAllowed).length
+  };
+});
+
 const canShipCurrentOrder = computed(() => currentOrder.value?.orderStatus === 'WAIT_SHIP' && currentOrder.value?.payStatus === 'PAID');
 const canUpdateDeliveryCurrentOrder = computed(() => !!currentOrder.value && currentOrder.value.deliveryStatus !== 'UNSHIPPED' && !!currentOrder.value.deliveryTime);
 
@@ -967,34 +1002,56 @@ onUnmounted(() => {
 
       <section v-if="page === 'dashboard'" class="page">
         <section class="metrics">
-          <article><span>订单总数</span><strong>{{ dashboard.orderCount }}</strong></article>
-          <article><span>支付金额</span><strong>¥{{ dashboard.payAmountText }}</strong></article>
-          <article><span>待发货</span><strong>{{ dashboard.waitShip }}</strong></article>
-          <article><span>待审售后</span><strong>{{ dashboard.refundApplying }}</strong></article>
-          <article><span>启用优惠券</span><strong>{{ dashboard.couponEnabled }}</strong></article>
-          <article><span>活跃用户</span><strong>{{ dashboard.activeMembers }}</strong></article>
+          <article class="metric-sales"><span>支付金额</span><strong>¥{{ dashboard.payAmountText }}</strong><em>累计支付金额</em></article>
+          <article class="metric-orders"><span>订单总数</span><strong>{{ dashboard.orderCount }}</strong><em>全部订单</em></article>
+          <article class="metric-warning"><span>待发货订单</span><strong>{{ dashboard.waitShip }}</strong><em>需要及时处理</em></article>
+          <article class="metric-success"><span>售后处理中</span><strong>{{ dashboard.refundApplying }}</strong><em>当前处理中的售后</em></article>
+          <span class="dashboard-fallback">优惠券 {{ dashboard.couponEnabled }} 活跃用户 {{ dashboard.activeMembers }}</span>
         </section>
         <section class="dashboard-grid">
-          <div class="panel">
-            <h2>销售趋势</h2>
+          <div class="panel sales-panel">
+            <div class="section-heading"><div><h2>销售趋势</h2><p>近 7 日订单金额</p></div><span class="range-label">近 7 日</span></div>
             <div class="chart-line">
-              <i v-for="height in [38, 54, 42, 76, 62, 88, 104]" :key="height" :style="{ height: `${height}px` }"></i>
+              <div v-for="item in salesTrend" :key="item.label" class="chart-column">
+                <i :class="{ today: item.label === '今日' }" :style="{ height: `${item.height}px` }"></i>
+                <small>{{ item.label }}</small>
+              </div>
+            </div>
+            <div class="chart-legend"><i></i><span>订单金额</span></div>
+          </div>
+          <div class="panel quick-panel">
+            <div class="section-heading"><div><h2>快捷操作</h2><p>常用运营入口</p></div></div>
+            <div class="quick-actions">
+              <button type="button" @click="openCreateProduct"><strong>新增商品</strong><span>快速创建商品</span><b>›</b></button>
+              <button type="button" @click="nav('orders')"><strong>处理订单</strong><span>查看待发货</span><b>›</b></button>
+              <button type="button" @click="nav('coupons')"><strong>创建优惠券</strong><span>配置营销活动</span><b>›</b></button>
+              <button type="button" @click="nav('inventory-reconciliation')"><strong>库存对账</strong><span>检查库存差异</span><b>›</b></button>
             </div>
           </div>
-          <div class="panel">
-            <h2>快捷入口</h2>
-            <div class="quick-actions">
-              <button type="button" @click="openCreateProduct">新增商品</button>
-              <button type="button" @click="nav('aftersale')">售后审核</button>
-              <button type="button" @click="nav('coupons')">优惠券管理</button>
-              <button type="button" @click="nav('logs')">操作日志</button>
-            </div>
+        </section>
+        <section class="dashboard-lower">
+          <div class="panel dashboard-list">
+            <div class="section-heading"><h2>最近订单</h2><button class="text-button" type="button" @click="nav('orders')">查看全部</button></div>
+            <table>
+              <thead><tr><th>订单号</th><th>买家</th><th>金额</th><th>状态</th></tr></thead>
+              <tbody>
+                <tr v-for="order in recentOrders" :key="order.id">
+                  <td><strong>{{ order.orderNo }}</strong></td><td>#{{ order.userId }}</td><td>¥{{ order.payAmountText }}</td><td><em :class="['status', order.orderStatus]">{{ statusText(order.orderStatus) }}</em></td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="recentOrders.length === 0" class="empty">暂无订单</div>
+          </div>
+          <div class="panel dashboard-list stock-list">
+            <div class="section-heading"><div><h2>库存提醒</h2><p>需要关注的 SKU</p></div></div>
+            <div v-for="product in lowStockProducts" :key="product.id" class="stock-row"><i></i><strong>{{ product.name }}</strong><em>仅剩 {{ product.stock }} 件</em></div>
+            <div v-if="lowStockProducts.length === 0" class="empty">暂无低库存商品</div>
           </div>
         </section>
       </section>
 
-      <section v-else-if="page === 'products'" class="page">
-        <section class="panel filters">
+      <section v-else-if="page === 'products'" class="page list-page">
+        <section class="panel filters page-filters">
           <input v-model="productFilters.name" placeholder="商品名称" />
           <select v-model="productFilters.categoryId">
             <option value="">全部分类</option>
@@ -1007,7 +1064,8 @@ onUnmounted(() => {
           </select>
           <button class="primary" type="button" @click="openCreateProduct">新增商品</button>
         </section>
-        <section class="panel table-panel">
+        <section class="panel table-panel list-panel">
+          <div class="section-heading"><div><h2>商品列表</h2><p>共 {{ filteredProducts.length }} 件商品</p></div></div>
           <table>
             <thead><tr><th>商品</th><th>分类</th><th>价格</th><th>库存</th><th>销量</th><th>状态</th><th>操作</th></tr></thead>
             <tbody>
@@ -1067,8 +1125,14 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section v-else-if="page === 'orders'" class="page">
-        <section class="panel filters">
+      <section v-else-if="page === 'orders'" class="page list-page">
+        <section class="compact-metrics">
+          <article><span>全部订单</span><strong>{{ orderStats.all }}</strong></article>
+          <article class="blue-card"><span>待付款</span><strong>{{ orderStats.waitPay }}</strong></article>
+          <article class="orange-card"><span>待发货</span><strong>{{ orderStats.waitShip }}</strong></article>
+          <article class="red-card"><span>售后中</span><strong>{{ orderStats.aftersale }}</strong></article>
+        </section>
+        <section class="panel filters page-filters">
           <input v-model="orderFilters.orderNo" placeholder="订单编号" />
           <input v-model="orderFilters.mobile" placeholder="手机号" />
           <select v-model="orderFilters.orderStatus">
@@ -1080,7 +1144,8 @@ onUnmounted(() => {
           </select>
           <button class="primary" type="button" @click="loadOrders">查询</button>
         </section>
-        <section class="panel table-panel">
+        <section class="panel table-panel list-panel">
+          <div class="section-heading"><div><h2>最近订单</h2><p>按下单时间倒序展示</p></div></div>
           <table>
             <thead><tr><th>订单编号</th><th>手机号</th><th>下单时间</th><th>金额</th><th>订单状态</th><th>支付状态</th><th>操作</th></tr></thead>
             <tbody>
@@ -1099,8 +1164,8 @@ onUnmounted(() => {
         </section>
       </section>
 
-      <section v-else-if="page === 'aftersales'" class="page">
-        <section class="panel filters">
+      <section v-else-if="page === 'aftersales'" class="page list-page">
+        <section class="panel filters page-filters">
           <input v-model="aftersaleFilters.keyword" placeholder="售后号 / 订单号 / 手机号" />
           <select v-model="aftersaleFilters.status">
             <option value="">全部状态</option>
@@ -1114,7 +1179,8 @@ onUnmounted(() => {
           </select>
           <button class="primary" type="button" @click="loadAftersales">刷新</button>
         </section>
-        <section class="panel table-panel">
+        <section class="panel table-panel list-panel">
+          <div class="section-heading"><div><h2>售后申请</h2><p>统一处理退款、退货和售后异常</p></div></div>
           <table>
             <thead><tr><th>售后编号</th><th>订单编号</th><th>手机号</th><th>退款金额</th><th>原因</th><th>状态</th><th>申请时间</th><th>审核结果</th><th>操作</th></tr></thead>
             <tbody>
@@ -1275,8 +1341,13 @@ onUnmounted(() => {
         </section>
       </section>
 
-      <section v-else-if="page === 'inventory-reconciliation'" class="page">
-        <section class="panel filters">
+      <section v-else-if="page === 'inventory-reconciliation'" class="page list-page">
+        <section class="compact-metrics inventory-metrics">
+          <article class="red-card"><span>库存差异</span><strong>{{ inventoryStats.diff }}</strong></article>
+          <article class="orange-card"><span>锁定库存</span><strong>{{ inventoryStats.locked }}</strong></article>
+          <article class="blue-card"><span>待修复 SKU</span><strong>{{ inventoryStats.repairable }}</strong></article>
+        </section>
+        <section class="panel filters page-filters">
           <label><input v-model="inventoryFilters.onlyDiff" type="checkbox" /> 只看差异</label>
           <button class="primary" type="button" @click="loadInventoryReconciliation">刷新对账</button>
         </section>
@@ -1288,7 +1359,7 @@ onUnmounted(() => {
             <div><span>说明</span><strong>{{ check.message }}</strong></div>
           </section>
         </section>
-        <section class="panel table-panel">
+        <section class="panel table-panel list-panel">
           <div class="section-heading">
             <h2>SKU 锁定库存对账</h2>
             <span>检查时间 {{ formatTime(inventoryReport?.checkedAt) }}</span>

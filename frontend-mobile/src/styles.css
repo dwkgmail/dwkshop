@@ -484,6 +484,61 @@ button:disabled {
   color: #7a8494;
 }
 
+.empty-guidance {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 30px 20px;
+}
+
+.empty-guidance strong {
+  color: #18202b;
+  font-size: 16px;
+}
+
+.empty-guidance p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.empty-guidance .ghost {
+  min-height: 36px;
+  margin-top: 6px;
+  padding: 0 16px;
+}
+
+.skeleton-card {
+  overflow: hidden;
+}
+
+.skeleton-block,
+.skeleton-line {
+  display: block;
+  border: 0;
+  background: linear-gradient(90deg, #eef1f4 25%, #f8fafb 37%, #eef1f4 63%);
+  background-size: 400% 100%;
+  animation: skeleton-loading 1.4s ease infinite;
+}
+
+.skeleton-card .product-visual {
+  background-color: #eef1f4;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  margin-top: 10px;
+}
+
+.wide-line { width: 86%; }
+.short-line { width: 58%; }
+.price-line { width: 34%; height: 16px; }
+
+@keyframes skeleton-loading {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
 .detail-title,
 .panel,
 .quantity-row,
@@ -788,6 +843,47 @@ button:disabled {
   margin: 0 auto;
   background: #fff;
   box-shadow: 0 14px 40px rgba(15, 23, 42, 0.16);
+}
+
+.error-box button + button {
+  margin-left: 12px;
+  color: #7a8494;
+}
+
+.confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(24, 32, 43, 0.44);
+}
+
+.confirm-dialog {
+  width: min(360px, 100%);
+  border-radius: 14px;
+  padding: 22px;
+  background: #fff;
+  box-shadow: 0 20px 60px rgba(24, 32, 43, 0.24);
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.confirm-dialog p {
+  margin: 10px 0 20px;
+  color: #7a8494;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .error-box button {

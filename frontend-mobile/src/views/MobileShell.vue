@@ -81,6 +81,12 @@ const orderClientRequestId = ref('');
 const currentOrder = ref<OrderDetail | null>(null);
 const orders = ref<OrderSummary[]>([]);
 const paymentMessage = ref('');
+const confirmDialog = ref<{
+  type: 'remove-cart' | 'cancel-order' | 'refund-order';
+  id: number;
+  title: string;
+  message: string;
+} | null>(null);
 
 const cartBadge = computed(() => (loggedIn.value ? cart.value?.badgeCount ?? 0 : 0));
 const displayError = computed(() => error.value.startsWith('请求失败 (500)') ? '请求失败（500），请稍后重试' : error.value);
@@ -414,6 +420,16 @@ async function loadOrderDetail(id: number) {
   });
 }
 
+async function retryCurrentView() {
+  error.value = '';
+  if (route.view === 'home') return loadHome();
+  if (route.view === 'category') return loadCategories();
+  if (route.view === 'cart') return loadCart();
+  if (route.view === 'orders') return loadOrders();
+  if (route.view === 'detail' && route.params.id) return loadProductDetail(Number(route.params.id));
+  if (route.view === 'order-detail' && route.params.id) return loadOrderDetail(Number(route.params.id));
+}
+
 async function cancelCurrentOrder(id: number) {
   await runTask(async () => {
     currentOrder.value = await cancelOrder(id);
@@ -429,6 +445,28 @@ async function applyRefund(order: OrderDetail) {
     currentOrder.value = await getOrder(order.id);
     showToast('Refund request submitted');
   });
+}
+
+function askRemoveCartItem(id: number) {
+  confirmDialog.value = { type: 'remove-cart', id, title: '删除购物车商品', message: '确认从购物车移除这件商品吗？' };
+}
+
+function askCancelOrder(id: number) {
+  confirmDialog.value = { type: 'cancel-order', id, title: '取消订单', message: '订单取消后将无法恢复，确认继续吗？' };
+}
+
+function askRefundOrder(order: OrderDetail) {
+  confirmDialog.value = { type: 'refund-order', id: order.id, title: '申请退款', message: '确认申请该订单退款吗？提交后将进入售后审核。' };
+}
+
+async function confirmDialogAction() {
+  const action = confirmDialog.value;
+  confirmDialog.value = null;
+  if (!action) return;
+  if (action.type === 'remove-cart') return removeCartItem(action.id);
+  if (action.type === 'cancel-order') return cancelCurrentOrder(action.id);
+  const order = currentOrder.value;
+  if (order && order.id === action.id) await applyRefund(order);
 }
 
 async function changeCartQuantity(id: number, quantity: number) {
@@ -590,7 +628,11 @@ onUnmounted(() => {
           <h2>精选推荐</h2>
           <button @click="loadHome">刷新</button>
         </div>
-        <div class="product-grid">
+        <div v-if="loading && products.length === 0" class="product-grid skeleton-grid" aria-label="正在加载商品">
+          <article v-for="index in 4" :key="index" class="product-card skeleton-card"><div class="skeleton-block product-visual"></div><div class="product-info"><i class="skeleton-line wide-line"></i><i class="skeleton-line short-line"></i><i class="skeleton-line price-line"></i></div></article>
+        </div>
+        <div v-else-if="products.length === 0" class="empty-state empty-guidance"><strong>暂时没有商品</strong><p>稍后再来看看，或搜索你想要的商品。</p><button class="ghost" type="button" @click="navigate('search')">去搜索商品</button></div>
+        <div v-else class="product-grid">
           <article v-for="product in products" :key="product.id" class="product-card" @click="navigate('detail', { id: product.id })">
             <div class="product-visual" :class="imageTone(product.id)">{{ product.name.slice(0, 2) }}</div>
             <div class="product-info">
@@ -682,13 +724,13 @@ onUnmounted(() => {
           </div>
         </div>
         <footer class="action-bar">
-          <button class="ghost" :disabled="!productDetail.allowCart || productDetail.offSale" @click="addCurrentSkuToCart">加入购物车</button>
-          <button class="primary" :disabled="productDetail.offSale" @click="buyNow">立即购买</button>
+          <button class="ghost" :disabled="loading || !productDetail.allowCart || productDetail.offSale" @click="addCurrentSkuToCart">加入购物车</button>
+          <button class="primary" :disabled="loading || productDetail.offSale" @click="buyNow">立即购买</button>
         </footer>
       </section>
 
       <section v-else-if="route.view === 'cart'" class="view cart-view">
-        <div v-if="!cart || cart.items.length === 0" class="empty-state">购物车还是空的</div>
+        <div v-if="!cart || cart.items.length === 0" class="empty-state empty-guidance"><strong>购物车还是空的</strong><p>把喜欢的商品加入购物车，再一起结算。</p><button class="ghost" type="button" @click="navigate('category')">去逛逛</button></div>
         <article v-for="item in cart?.items" :key="item.id" class="cart-item">
           <input type="checkbox" :checked="item.checked" :disabled="!item.canCheck" @change="toggleCartItem(item.id, ($event.target as HTMLInputElement).checked)" />
           <div class="small-visual" :class="imageTone(item.productId)">{{ item.productName?.slice(0, 1) }}</div>
@@ -703,14 +745,14 @@ onUnmounted(() => {
                 <strong>{{ item.quantity }}</strong>
                 <button @click="changeCartQuantity(item.id, item.quantity + 1)">+</button>
               </div>
-              <button class="text-danger" @click="removeCartItem(item.id)">删除</button>
+              <button class="text-danger" :disabled="loading" @click="askRemoveCartItem(item.id)">删除</button>
             </div>
           </div>
         </article>
         <footer class="cart-bar">
           <label><input type="checkbox" :checked="allCartChecked" @change="toggleAllCartItems" /> 全选</label>
           <div><span>合计</span><strong>¥{{ cart?.estimatedAmountText ?? '0' }}</strong></div>
-          <button class="primary" :disabled="cart ? !cart.checkoutAvailable : true" @click="openCartConfirm">去结算</button>
+          <button class="primary" :disabled="loading || (cart ? !cart.checkoutAvailable : true)" @click="openCartConfirm">去结算</button>
         </footer>
         <p v-if="cart?.checkoutMessage" class="cart-warning">{{ cart.checkoutMessage }}</p>
       </section>
@@ -743,7 +785,7 @@ onUnmounted(() => {
             <div><span>积分抵扣</span><strong>-¥{{ confirmData.amount.pointDiscountAmountText }}</strong></div>
             <div><span>应付金额</span><strong class="orange">¥{{ confirmData.amount.payAmountText }}</strong></div>
           </section>
-          <button class="primary wide" @click="submitOrder">提交订单</button>
+          <button class="primary wide" :disabled="loading" @click="submitOrder">提交订单</button>
         </div>
       </section>
 
@@ -757,13 +799,13 @@ onUnmounted(() => {
           <label><input type="radio" checked /> 模拟微信支付</label>
           <label><input type="radio" /> 模拟支付宝支付</label>
         </section>
-        <button class="primary wide" :disabled="currentOrder?.orderStatus !== 'WAIT_PAY'" @click="payCurrentOrder">立即支付</button>
+        <button class="primary wide" :disabled="loading || currentOrder?.orderStatus !== 'WAIT_PAY'" @click="payCurrentOrder">立即支付</button>
         <p v-if="paymentMessage" class="success-text">{{ paymentMessage }}</p>
         <button class="ghost wide" @click="currentOrder && navigate('order-detail', { id: currentOrder.id })">查看订单</button>
       </section>
 
       <section v-else-if="route.view === 'orders'" class="view">
-        <div v-if="orders.length === 0" class="empty-state">暂无订单</div>
+        <div v-if="orders.length === 0" class="empty-state empty-guidance"><strong>暂无订单</strong><p>下单后，你可以在这里查看订单进度。</p><button class="ghost" type="button" @click="navigate('category')">去逛逛</button></div>
         <article v-for="order in orders" :key="order.id" class="order-card" @click="navigate('order-detail', { id: order.id })">
           <div><strong>{{ order.orderNo }}</strong><span>{{ statusText(order.orderStatus) }}</span></div>
           <p>实付 ¥{{ order.payAmountText }}</p>
@@ -789,8 +831,8 @@ onUnmounted(() => {
         <section class="panel detail-list">
           <div><span>实付金额</span><strong class="orange">¥{{ currentOrder.payAmountText }}</strong></div>
         </section>
-        <button v-if="currentOrder.orderStatus === 'WAIT_PAY'" class="ghost wide" @click="cancelCurrentOrder(currentOrder.id)">取消订单</button>
-        <button v-if="currentOrder.payStatus === 'PAID' && currentOrder.aftersaleStatus === 'NONE'" class="ghost wide" @click="applyRefund(currentOrder)">申请退款</button>
+        <button v-if="currentOrder.orderStatus === 'WAIT_PAY'" class="ghost wide" :disabled="loading" @click="askCancelOrder(currentOrder.id)">取消订单</button>
+        <button v-if="currentOrder.payStatus === 'PAID' && currentOrder.aftersaleStatus === 'NONE'" class="ghost wide" :disabled="loading" @click="askRefundOrder(currentOrder)">申请退款</button>
       </section>
 
       <section v-else-if="route.view === 'mine'" class="view mine-view">
@@ -833,7 +875,15 @@ onUnmounted(() => {
       <div v-if="loading" class="loading-mask">加载中...</div>
       <div v-if="error" class="error-box">
         <span>{{ displayError }}</span>
-        <button @click="error = ''">知道了</button>
+        <button type="button" @click="retryCurrentView">重试</button>
+        <button type="button" @click="error = ''">关闭</button>
+      </div>
+      <div v-if="confirmDialog" class="confirm-modal" role="dialog" aria-modal="true">
+        <div class="confirm-dialog">
+          <h2>{{ confirmDialog.title }}</h2>
+          <p>{{ confirmDialog.message }}</p>
+          <div class="confirm-actions"><button class="ghost" type="button" @click="confirmDialog = null">取消</button><button class="primary" type="button" :disabled="loading" @click="confirmDialogAction">确认</button></div>
+        </div>
       </div>
     </section>
 

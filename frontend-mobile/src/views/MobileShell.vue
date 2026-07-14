@@ -578,6 +578,7 @@ onUnmounted(() => {
           <span>本周精选</span>
           <strong>好物限时优惠</strong>
           <p>从商品浏览到下单支付，一站式完成购物。</p>
+          <button class="hero-action" type="button" @click="navigate('category')">立即浏览</button>
         </section>
         <section class="shortcut-grid">
           <button @click="navigate('category')">分类</button>
